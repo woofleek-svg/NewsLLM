@@ -88,6 +88,8 @@ services:
     depends_on:
       postgres-output:
         condition: service_healthy
+    volumes:
+      - ./mcp-server/themes.json:/app/themes.json
     environment:
       OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
       SMTP_USER: ${SMTP_USER}

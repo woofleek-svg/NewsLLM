@@ -343,20 +343,65 @@ URGENCY_LABELS = {1: "Routine", 2: "Notable", 3: "Breaking"}
 URGENCY_COLORS = {1: "#94a3b8", 2: "#f59e0b", 3: "#ef4444"}
 URGENCY_BG = {1: "#f8fafc", 2: "#fffbeb", 3: "#fef2f2"}
 
+# ---------------------------------------------------------------------------
+# Themes — loaded from themes.json, hot-reloaded on each email send
+# ---------------------------------------------------------------------------
 
-def _build_briefing_html(articles: list[dict], intro: str = "") -> str:
+THEMES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "themes.json")
+
+DEFAULT_THEME = {
+    "name": "NewsLLM",
+    "tagline": "Daily Intelligence Briefing",
+    "font": "-apple-system, 'Segoe UI', Roboto, Arial, sans-serif",
+    "bg_outer": "#0f172a",
+    "header_from": "#1e293b",
+    "header_to": "#0f172a",
+    "header_text": "#ffffff",
+    "header_sub": "#94a3b8",
+    "badge_bg": "#2563eb",
+    "accent": "#2563eb",
+    "tag_bg": "#e2e8f0",
+    "tag_text": "#475569",
+    "footer_bg": "#f8fafc",
+}
+
+
+def _load_themes() -> dict:
+    """Load themes from themes.json. Re-reads each call so edits take effect without restart."""
+    try:
+        with open(THEMES_PATH) as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as exc:
+        log.warning("Could not load themes.json (%s), using default theme only", exc)
+        return {"default": DEFAULT_THEME}
+
+
+def _get_theme(theme_name: str = "default") -> dict:
+    """Get a theme by name, falling back to default."""
+    themes = _load_themes()
+    theme = themes.get(theme_name.lower())
+    if theme:
+        # Merge with default so missing keys don't break the template
+        merged = {**DEFAULT_THEME, **theme}
+        return merged
+    return {**DEFAULT_THEME, **themes.get("default", {})}
+
+
+def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str = "default") -> str:
     """Build a news-site styled HTML email from a list of article dicts."""
+    t = _get_theme(theme_name)
+
     # Separate by urgency for sectioned layout
     breaking = [a for a in articles if a.get("urgency_score", a.get("urgency", 1)) == 3]
     notable = [a for a in articles if a.get("urgency_score", a.get("urgency", 1)) == 2]
     routine = [a for a in articles if a.get("urgency_score", a.get("urgency", 1)) == 1]
 
-    html = """\
+    html = f"""\
 <html>
-<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;">
+<body style="margin: 0; padding: 0; background-color: {t['bg_outer']}; font-family: {t['font']};">
 
 <!-- Outer wrapper -->
-<table width="100%" cellpadding="0" cellspacing="0" style="background-color: #0f172a; padding: 24px 0;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background-color: {t['bg_outer']}; padding: 24px 0;">
 <tr><td align="center">
 
 <!-- Main card -->
@@ -364,15 +409,15 @@ def _build_briefing_html(articles: list[dict], intro: str = "") -> str:
 
 <!-- Header -->
 <tr>
-<td style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 32px 32px 24px 32px;">
+<td style="background: linear-gradient(135deg, {t['header_from']} 0%, {t['header_to']} 100%); padding: 32px 32px 24px 32px;">
   <table width="100%" cellpadding="0" cellspacing="0">
   <tr>
     <td>
-      <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px;">NewsLLM</h1>
-      <p style="margin: 4px 0 0 0; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1.5px;">Daily Intelligence Briefing</p>
+      <h1 style="margin: 0; font-size: 28px; font-weight: 800; color: {t['header_text']}; letter-spacing: -0.5px;">{t['name']}</h1>
+      <p style="margin: 4px 0 0 0; font-size: 13px; color: {t['header_sub']}; text-transform: uppercase; letter-spacing: 1.5px;">{t['tagline']}</p>
     </td>
     <td align="right" style="vertical-align: top;">
-      <span style="display: inline-block; background: #2563eb; color: #ffffff; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 20px; letter-spacing: 0.5px;">""" + f"""{len(articles)} STORIES</span>
+      <span style="display: inline-block; background: {t['badge_bg']}; color: #ffffff; font-size: 11px; font-weight: 700; padding: 6px 12px; border-radius: 20px; letter-spacing: 0.5px;">{len(articles)} STORIES</span>
     </td>
   </tr>
   </table>
@@ -414,8 +459,8 @@ def _build_briefing_html(articles: list[dict], intro: str = "") -> str:
             image_url = html.escape(raw_image, quote=True) if raw_image else None
             tags = a.get("tags", [])
             tag_html = ""
-            for t in tags[:4]:
-                tag_html += f'<span style="display: inline-block; background: #e2e8f0; color: #475569; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px;">{html.escape(t)}</span>'
+            for tag in tags[:4]:
+                tag_html += f'<span style="display: inline-block; background: {t["tag_bg"]}; color: {t["tag_text"]}; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px;">{html.escape(tag)}</span>'
 
             border_bottom = f'border-bottom: 1px solid #e2e8f0;' if i < len(section_articles) - 1 else ''
 
@@ -459,14 +504,14 @@ def _build_briefing_html(articles: list[dict], intro: str = "") -> str:
     html += _render_section(notable, "Notable Stories", "#f59e0b", "#fffbeb", "&#9733;")
     html += _render_section(routine, "Latest News", "#64748b", "#f8fafc", "&#9679;")
 
-    html += """\
+    html += f"""\
 <!-- Footer -->
 <tr>
-<td style="background: #f8fafc; padding: 20px 32px; border-top: 1px solid #e2e8f0;">
+<td style="background: {t['footer_bg']}; padding: 20px 32px; border-top: 1px solid #e2e8f0;">
   <table width="100%" cellpadding="0" cellspacing="0">
   <tr>
     <td>
-      <p style="margin: 0; font-size: 11px; color: #94a3b8;">Powered by <strong style="color: #64748b;">NewsLLM</strong> &mdash; AI News Aggregator</p>
+      <p style="margin: 0; font-size: 11px; color: #94a3b8;">Powered by <strong style="color: #64748b;">{t['name']}</strong> &mdash; AI News Aggregator</p>
     </td>
     <td align="right">
       <p style="margin: 0; font-size: 11px; color: #94a3b8;">Automated briefing &bull; Do not reply</p>
@@ -540,7 +585,26 @@ def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict
 
 
 # ---------------------------------------------------------------------------
-# Tool 7: Email a briefing
+# Tool 7: List available themes
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_themes() -> dict:
+    """List available email themes with their names and color descriptions.
+
+    Call this to see what themes are available for email_briefing().
+    Themes are defined in themes.json and can be added/edited without code changes.
+    """
+    themes = _load_themes()
+    return {
+        name: {"name": t.get("name", name), "tagline": t.get("tagline", ""), "accent": t.get("accent", "")}
+        for name, t in themes.items()
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: Email a briefing
 # ---------------------------------------------------------------------------
 
 
@@ -551,6 +615,7 @@ def email_briefing(
     hours: int = 24,
     limit: int = 20,
     intro: str = "",
+    theme: str = "default",
     recipients: list[str] | None = None,
 ) -> dict:
     """Build and email a news briefing directly from the database.
@@ -561,10 +626,14 @@ def email_briefing(
 
     Args:
         subject: Email subject line (e.g. "Morning News Briefing — March 29").
-        category: Filter by category (e.g. "Local", "News"). Empty for all.
+        category: Filter by category (e.g. "Cleveland", "Chicago", "News"). Empty for all.
         hours: How far back to look (default 24, max 48).
         limit: Max articles to include (default 20, max 50).
-        intro: Optional intro paragraph for the email (e.g. "Here's your morning update.").
+        intro: Optional intro paragraph for the email.
+        theme: Visual theme for the email. Available themes:
+               "default" (dark navy/blue), "cleveland" (purple/violet),
+               "chicago" (navy/red), "tech" (green/emerald),
+               "national" (gray/crimson). Default is "default".
         recipients: Optional override list of email addresses. Omit to use defaults.
 
     Returns send status with recipient list.
@@ -594,7 +663,7 @@ def email_briefing(
     if not articles:
         return {"error": "No articles found for the given filters"}
 
-    html = _build_briefing_html(articles, intro)
+    html = _build_briefing_html(articles, intro, theme_name=theme)
     plain = _build_plain_text(articles, intro)
     to_addrs = recipients if recipients else EMAIL_RECIPIENTS
 

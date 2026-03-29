@@ -21,7 +21,7 @@ Automated AI news aggregator and alerting system for homelab deployment. Pulls a
 - **RSS ingestion** via Miniflux with automatic polling, deduplication, and category support
 - **LLM-powered analysis** — each article gets a 2-3 sentence summary, topic tags, named entity extraction, and a 3-tier urgency score (routine / notable / breaking)
 - **MCP server** with progressive discovery tools — list sources, get briefings, search by keyword/tag, drill into articles
-- **Email briefings** — styled HTML emails with article thumbnails, grouped by urgency, sent via Gmail SMTP
+- **Themed email briefings** — styled HTML emails with article thumbnails, grouped by urgency, with customizable themes per category (edit `themes.json` — no code changes needed)
 - **48-hour rolling window** — automatic purge keeps the database lightweight
 - **Image extraction** — pulls article images from RSS enclosures or content HTML
 - **Network isolation** — Miniflux DB is firewalled from everything except Miniflux itself
@@ -29,14 +29,14 @@ Automated AI news aggregator and alerting system for homelab deployment. Pulls a
 ## Prerequisites
 
 - Docker and Docker Compose
-- A running [llama.cpp](https://github.com/ggerganov/llama.cpp) server with an OpenAI-compatible API (tested with Qwen 3.5 35B Q4)
-- (Optional) Gmail account with an [app password](https://support.google.com/accounts/answer/185833) for email briefings
+- A running LLM server with an OpenAI-compatible API (tested with Qwen 3.5 35B Q4 via llama.cpp; also supports Ollama, vLLM, or any compatible endpoint)
+- (Optional) SMTP credentials for email briefings (Gmail with [app password](https://support.google.com/accounts/answer/185833), or any SMTP server)
 
 ## Quick Start
 
 ```bash
 # Clone the repo
-git clone https://github.com/youruser/NewsLLM.git
+git clone https://github.com/woofleek-svg/NewsLLM.git
 cd NewsLLM
 
 # Configure environment
@@ -78,7 +78,8 @@ The MCP server exposes these tools for AI clients:
 | `get_article(article_id)` | Full details for a specific article |
 | `get_breaking(hours)` | Urgency=3 alerts only |
 | `get_stats()` | Pipeline health and article counts |
-| `email_briefing(subject, category, hours, ...)` | Build and send an HTML briefing email |
+| `list_themes()` | List available email themes |
+| `email_briefing(subject, category, theme, ...)` | Build and send a themed HTML briefing email |
 | `send_email(subject, body)` | Send a short custom notification |
 
 ### Connecting an MCP Client
@@ -110,7 +111,9 @@ Key settings:
 | `LLM_API_KEY` | — | Bearer token (required for vLLM with auth) |
 | `POLL_INTERVAL` | `300` | Seconds between Miniflux polls |
 | `MAX_CONTENT_LENGTH` | `64000` | Max article chars sent to the LLM |
-| `SMTP_USER` / `SMTP_PASSWORD` | — | Gmail credentials for email briefings |
+| `SMTP_HOST` | `smtp.gmail.com` | SMTP server hostname |
+| `SMTP_PORT` | `587` | SMTP server port |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | SMTP credentials for email briefings |
 | `EMAIL_RECIPIENTS` | — | Comma-separated default email recipients |
 
 ### LLM Backend Examples
@@ -155,6 +158,36 @@ The LLM scores each article on a 3-tier scale:
 
 The prompt instructs the model to prefer lower scores when uncertain to avoid alert fatigue.
 
+## Email Themes
+
+Email briefings support visual themes that can be customized per category. Themes are defined in [`mcp-server/themes.json`](mcp-server/themes.json) and hot-reloaded on each send — no rebuild required.
+
+Built-in themes: `default`, `cleveland`, `chicago`, `tech`, `national`
+
+To add a custom theme, edit `themes.json` and add a new entry:
+
+```json
+{
+  "my-city": {
+    "name": "My City Briefing",
+    "tagline": "Local News Digest",
+    "font": "Georgia, serif",
+    "bg_outer": "#1a1a2e",
+    "header_from": "#16213e",
+    "header_to": "#0f3460",
+    "header_text": "#ffffff",
+    "header_sub": "#a8b2d1",
+    "badge_bg": "#e94560",
+    "accent": "#e94560",
+    "tag_bg": "#fce4ec",
+    "tag_text": "#880e4f",
+    "footer_bg": "#f5f5f5"
+  }
+}
+```
+
+Then use it: `email_briefing(subject="...", category="My City", theme="my-city")`
+
 ## Project Structure
 
 ```
@@ -169,7 +202,8 @@ NewsLLM/
 ├── mcp-server/
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   └── server.py             # MCP tool server + email
+│   ├── server.py             # MCP tool server + email
+│   └── themes.json           # Email theme definitions (hot-reloaded)
 └── ai-news-aggregator-implementation-plan.md
 ```
 
