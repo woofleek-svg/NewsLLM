@@ -473,8 +473,8 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
         <a href="{url}" style="text-decoration: none; color: #0f172a; font-size: 16px; font-weight: 700; line-height: 1.3; display: block; margin-bottom: 6px;">{title}</a>
         <p style="margin: 0; color: #475569; font-size: 13px; line-height: 1.55;">{summary}</p>
       </td>
-      <td width="120" style="vertical-align: top;">
-        <a href="{url}"><img src="{image_url}" width="120" height="90" alt="" style="border-radius: 6px; object-fit: cover; display: block;" /></a>
+      <td width="120" style="vertical-align: top; min-width: 120px;">
+        <a href="{url}"><img src="{image_url}" alt="" width="120" height="90" style="width: 120px; height: 90px; max-width: 120px; max-height: 90px; border-radius: 6px; object-fit: cover; display: block;" /></a>
       </td>
     </tr>
     </table>"""

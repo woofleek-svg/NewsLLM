@@ -182,12 +182,43 @@ def validate_llm_output(data: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def _optimize_image_url(url: str) -> str:
+    """Rewrite image URLs to request a smaller version where the CDN supports it."""
+    parsed = urllib.parse.urlparse(url)
+    params = urllib.parse.parse_qs(parsed.query)
+
+    # WordPress (wp.com / i0.wp.com) — use w= or resize= param
+    if "wp.com" in parsed.hostname or "wordpress.com" in parsed.hostname:
+        params["w"] = ["600"]
+        params.pop("fit", None)
+        params.pop("resize", None)
+        new_query = urllib.parse.urlencode(params, doseq=True)
+        return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+    # NBC / Tegna media — use fit= param
+    if "nbcnews.com" in parsed.hostname or "nbcchicago.com" in parsed.hostname or "tegna-media.com" in parsed.hostname:
+        params["fit"] = ["600,400"]
+        params["quality"] = ["75"]
+        new_query = urllib.parse.urlencode(params, doseq=True)
+        return urllib.parse.urlunparse(parsed._replace(query=new_query))
+
+    # Atlantic CDN — thumbor URLs support path-based resizing
+    if "cdn.theatlantic.com" in parsed.hostname and "/thumbor/" in parsed.path:
+        # Replace existing size spec with a bounded one
+        optimized_path = re.sub(r'/thumbor/[^/]+/', '/thumbor/600x0/', parsed.path)
+        return urllib.parse.urlunparse(parsed._replace(path=optimized_path))
+
+    return url
+
+
 def extract_image_url(entry: dict) -> str | None:
     """Extract an image URL from a Miniflux entry using a fallback chain.
 
     1. Enclosure with image mime type
     2. First <img src="..."> in content HTML
     3. None
+
+    URLs are optimized to request smaller versions where supported.
     """
     # Check enclosures first
     for enc in entry.get("enclosures") or []:
@@ -197,7 +228,7 @@ def extract_image_url(entry: dict) -> str | None:
             try:
                 parsed = urllib.parse.urlparse(url)
                 if parsed.scheme in ("http", "https"):
-                    return url
+                    return _optimize_image_url(url)
             except ValueError:
                 pass
 
@@ -209,7 +240,7 @@ def extract_image_url(entry: dict) -> str | None:
         try:
             parsed = urllib.parse.urlparse(url)
             if parsed.scheme in ("http", "https"):
-                return url
+                return _optimize_image_url(url)
         except ValueError:
             pass
 
