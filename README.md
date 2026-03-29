@@ -115,7 +115,7 @@ unless told otherwise.
 **Prompt — City briefing:**
 ```
 Send a Cleveland news briefing email. Use category="Cleveland",
-theme="cleveland", subject "Zylstra Cleveland News Briefing — {today's date}",
+theme="cleveland", subject "Cleveland News Briefing — {today's date}",
 and intro "Here's your daily Cleveland news roundup, sorted by importance."
 ```
 
