@@ -243,6 +243,8 @@ NewsLLM/
 │   └── themes.json           # Email theme definitions (hot-reloaded)
 └── ai-news-aggregator-implementation-plan.md
 ```
+##Example Image
+<img width="1318" height="2014" alt="image" src="https://github.com/user-attachments/assets/8690e869-176a-4075-a2c1-4b02e6dd3cd7" />
 
 ## License
 
