@@ -87,11 +87,15 @@ def fetch_unread_entries(limit: int = 50) -> list[dict]:
 
 def mark_entry_read(entry_id: int) -> None:
     """Mark a single Miniflux entry as read."""
-    _miniflux_session.put(
-        f"{MINIFLUX_URL}/entries",
-        json={"entry_ids": [entry_id], "status": "read"},
-        timeout=15,
-    )
+    try:
+        resp = _miniflux_session.put(
+            f"{MINIFLUX_URL}/entries",
+            json={"entry_ids": [entry_id], "status": "read"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        log.warning("Failed to mark entry %d as read: %s", entry_id, exc)
 
 
 # ---------------------------------------------------------------------------
@@ -311,7 +315,7 @@ def process_entry(cur, entry: dict) -> None:
             raise LLMUnavailableError(str(exc))
 
         if llm_output is None:
-            last_error = f"Failed to parse JSON from LLM response"
+            last_error = "Failed to parse JSON from LLM response"
             log.warning("Attempt %d — parse error for %d (raw: %.200s)", attempt + 1, miniflux_id, raw_text)
             continue
 
@@ -377,6 +381,10 @@ def run_cycle() -> None:
 
 
 def main() -> None:
+    if not LLM_URL:
+        log.critical("LLM_URL (or LLAMA_CPP_URL) environment variable is not set — cannot start")
+        sys.exit(1)
+
     log.info("News processor starting (poll_interval=%ds, model=%s, backend=%s)", POLL_INTERVAL, LLM_MODEL, LLM_BACKEND)
 
     while True:
