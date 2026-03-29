@@ -1,0 +1,106 @@
+services:
+  # --- Ingestion Layer ---
+  postgres-miniflux:
+    image: postgres:16
+    restart: unless-stopped
+    volumes:
+      - miniflux_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: miniflux
+      POSTGRES_PASSWORD: ${MINIFLUX_DB_PASSWORD}
+      POSTGRES_DB: miniflux
+    networks:
+      - ingestion
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miniflux"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  miniflux:
+    image: miniflux/miniflux:latest
+    restart: unless-stopped
+    depends_on:
+      postgres-miniflux:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://miniflux:${MINIFLUX_DB_PASSWORD}@postgres-miniflux/miniflux?sslmode=disable
+      RUN_MIGRATIONS: "1"
+      CREATE_ADMIN: "1"
+      ADMIN_USERNAME: ${MINIFLUX_ADMIN_USERNAME}
+      ADMIN_PASSWORD: ${MINIFLUX_ADMIN_PASSWORD}
+      POLLING_FREQUENCY: "30"
+      CLEANUP_ARCHIVE_UNREAD_DAYS: "7"
+      CLEANUP_ARCHIVE_READ_DAYS: "7"
+    ports:
+      - "8085:8080"
+    networks:
+      - ingestion
+      - processing
+
+  # --- Output Layer ---
+  postgres-output:
+    image: postgres:16
+    restart: unless-stopped
+    volumes:
+      - output_data:/var/lib/postgresql/data
+      - ./init-output-db.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_USER: newsagent
+      POSTGRES_PASSWORD: ${OUTPUT_DB_PASSWORD}
+      POSTGRES_DB: news_output
+    networks:
+      - processing
+      - mcp
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U newsagent -d news_output"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- Processing Layer ---
+  news-processor:
+    build: ./processor
+    restart: unless-stopped
+    depends_on:
+      miniflux:
+        condition: service_started
+      postgres-output:
+        condition: service_healthy
+    environment:
+      MINIFLUX_URL: http://miniflux:8080/v1
+      MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
+      LLAMA_CPP_URL: ${LLAMA_CPP_URL}
+      LLAMA_MODEL: ${LLAMA_MODEL}
+      OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
+      POLL_INTERVAL: ${POLL_INTERVAL}
+      MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH}
+      MAX_RETRIES: ${MAX_RETRIES}
+    networks:
+      - processing
+
+  # --- MCP Layer ---
+  mcp-server:
+    build: ./mcp-server
+    restart: unless-stopped
+    depends_on:
+      postgres-output:
+        condition: service_healthy
+    environment:
+      OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      EMAIL_RECIPIENTS: ${EMAIL_RECIPIENTS}
+    ports:
+      - "8100:8000"
+    networks:
+      - mcp
+
+volumes:
+  miniflux_data:
+  output_data:
+
+networks:
+  ingestion:
+  processing:
+  mcp:
