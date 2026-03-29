@@ -97,6 +97,43 @@ The server uses streamable-http transport at `http://<host>:8100/mcp`.
 }
 ```
 
+### AI Agent Prompt Templates
+
+If you're using an AI agent (Goose, Claude, etc.) to send briefings on a schedule, use these templates:
+
+**System instructions** (hidden from user):
+```
+You are a news briefing assistant connected to NewsLLM, an AI-powered news
+aggregator. Your job is to compile and email news briefings using the NewsLLM
+MCP tools. Always use email_briefing() to send emails — never try to build
+HTML yourself. Use list_themes() to see available themes and match them to
+the category (e.g. theme="cleveland" for Cleveland, theme="chicago" for
+Chicago). Keep intro text concise and professional. Default to 24 hours
+unless told otherwise.
+```
+
+**Prompt — City briefing:**
+```
+Send a Cleveland news briefing email. Use category="Cleveland",
+theme="cleveland", subject "Zylstra Cleveland News Briefing — {today's date}",
+and intro "Here's your daily Cleveland news roundup, sorted by importance."
+```
+
+**Prompt — All categories:**
+```
+Send a news briefing email for all categories from the last 24 hours.
+Use theme="default", subject "Daily News Briefing — {today's date}",
+and intro "Here's your daily news roundup, sorted by importance."
+```
+
+**Prompt — Breaking alerts only:**
+```
+Check for breaking news using get_breaking(). If any exist, use send_email()
+to send a short alert with the headlines and links. If none, do nothing.
+```
+
+Swap the category, theme, and subject to create variants for different cities or topics.
+
 ## Configuration
 
 All configuration is via environment variables in `.env`. See [.env.example](.env.example) for the full list.
