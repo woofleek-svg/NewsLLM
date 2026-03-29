@@ -210,13 +210,15 @@ def get_db_connection():
     return psycopg2.connect(OUTPUT_DB_URL)
 
 
-def article_already_processed(cur, miniflux_id: int) -> bool:
-    """Check if we've already processed this article."""
+def get_already_processed_ids(cur, miniflux_ids: list[int]) -> set[int]:
+    """Check which of the given Miniflux IDs have already been processed."""
+    if not miniflux_ids:
+        return set()
     cur.execute(
-        "SELECT 1 FROM processed_articles WHERE miniflux_id = %s",
-        (miniflux_id,),
+        "SELECT miniflux_id FROM processed_articles WHERE miniflux_id = ANY(%s)",
+        (miniflux_ids,),
     )
-    return cur.fetchone() is not None
+    return {row[0] for row in cur.fetchall()}
 
 
 def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, processing_ms: int) -> None:
@@ -280,7 +282,7 @@ class LLMUnavailableError(Exception):
     """Raised when the LLM server is unreachable or times out."""
 
 
-def process_entry(cur, entry: dict) -> None:
+def process_entry(cur, entry: dict, processed_ids: set[int]) -> None:
     """Process a single Miniflux entry through the LLM pipeline.
 
     Raises LLMUnavailableError if the LLM server can't be reached,
@@ -289,7 +291,7 @@ def process_entry(cur, entry: dict) -> None:
     miniflux_id = entry["id"]
     title = entry.get("title", "(no title)")
 
-    if article_already_processed(cur, miniflux_id):
+    if miniflux_id in processed_ids:
         log.debug("Skipping already-processed article %d: %s", miniflux_id, title)
         return
 
@@ -355,9 +357,12 @@ def run_cycle() -> None:
 
     try:
         with conn.cursor() as cur:
+            # Batch check already processed articles
+            processed_ids = get_already_processed_ids(cur, [e["id"] for e in entries])
+
             for entry in entries:
                 try:
-                    process_entry(cur, entry)
+                    process_entry(cur, entry, processed_ids)
                     conn.commit()
                 except LLMUnavailableError:
                     conn.rollback()
