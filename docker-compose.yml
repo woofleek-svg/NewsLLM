@@ -70,8 +70,10 @@ services:
     environment:
       MINIFLUX_URL: http://miniflux:8080/v1
       MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
-      LLAMA_CPP_URL: ${LLAMA_CPP_URL}
-      LLAMA_MODEL: ${LLAMA_MODEL}
+      LLM_URL: ${LLM_URL:-${LLAMA_CPP_URL}}
+      LLM_MODEL: ${LLM_MODEL:-${LLAMA_MODEL}}
+      LLM_BACKEND: ${LLM_BACKEND:-llama.cpp}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
       POLL_INTERVAL: ${POLL_INTERVAL}
       MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH}

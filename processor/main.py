@@ -28,11 +28,13 @@ log = logging.getLogger("news-processor")
 
 MINIFLUX_URL = os.environ["MINIFLUX_URL"]
 MINIFLUX_API_KEY = os.environ["MINIFLUX_API_KEY"]
-LLAMA_CPP_URL = os.environ["LLAMA_CPP_URL"]
-LLAMA_MODEL = os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
+LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL")  # LLAMA_CPP_URL kept for backwards compat
+LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | ollama | vllm | generic
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
-MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "4000"))
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "1"))
 
 SYSTEM_PROMPT = """\
@@ -98,8 +100,9 @@ def mark_entry_read(entry_id: int) -> None:
 
 
 def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[dict | None, str]:
-    """Send article to llama.cpp and return (parsed_json, raw_text).
+    """Send article to the LLM and return (parsed_json, raw_text).
 
+    Supports llama.cpp, Ollama, vLLM, and any OpenAI-compatible API.
     Returns (None, raw_text) if the response can't be parsed as JSON.
     Raises requests.RequestException if the server is unreachable.
     """
@@ -111,16 +114,27 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     )
 
     payload = {
-        "model": LLAMA_MODEL,
+        "model": LLM_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
         "temperature": 0.1,
-        "chat_template_kwargs": {"enable_thinking": False},
     }
 
-    resp = requests.post(LLAMA_CPP_URL, json=payload, timeout=300)
+    # Backend-specific options
+    if LLM_BACKEND == "llama.cpp":
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+    elif LLM_BACKEND == "vllm":
+        payload["max_tokens"] = 1024
+    elif LLM_BACKEND == "ollama":
+        payload["options"] = {"num_predict": 1024}
+
+    headers = {"Content-Type": "application/json"}
+    if LLM_API_KEY:
+        headers["Authorization"] = f"Bearer {LLM_API_KEY}"
+
+    resp = requests.post(LLM_URL, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     raw_text = resp.json()["choices"][0]["message"]["content"]
@@ -229,7 +243,7 @@ def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, 
             llm_output["tags"],
             json.dumps(llm_output["entities"]),
             llm_output["urgency_score"],
-            LLAMA_MODEL,
+            LLM_MODEL,
             processing_ms,
             json.dumps({"raw": raw_text}),
         ),
@@ -363,7 +377,7 @@ def run_cycle() -> None:
 
 
 def main() -> None:
-    log.info("News processor starting (poll_interval=%ds, model=%s)", POLL_INTERVAL, LLAMA_MODEL)
+    log.info("News processor starting (poll_interval=%ds, model=%s, backend=%s)", POLL_INTERVAL, LLM_MODEL, LLM_BACKEND)
 
     while True:
         run_cycle()

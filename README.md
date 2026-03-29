@@ -104,12 +104,46 @@ Key settings:
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLAMA_CPP_URL` | — | Your llama.cpp server's `/v1/chat/completions` endpoint |
-| `LLAMA_MODEL` | `qwen3.5-35b` | Model identifier (for logging) |
+| `LLM_BACKEND` | `llama.cpp` | Backend type: `llama.cpp`, `ollama`, `vllm`, or `generic` |
+| `LLM_URL` | — | Chat completions endpoint (see examples below) |
+| `LLM_MODEL` | `qwen3.5-35b` | Model name passed to the API |
+| `LLM_API_KEY` | — | Bearer token (required for vLLM with auth) |
 | `POLL_INTERVAL` | `300` | Seconds between Miniflux polls |
 | `MAX_CONTENT_LENGTH` | `64000` | Max article chars sent to the LLM |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | Gmail credentials for email briefings |
 | `EMAIL_RECIPIENTS` | — | Comma-separated default email recipients |
+
+### LLM Backend Examples
+
+**llama.cpp** (default):
+```env
+LLM_BACKEND=llama.cpp
+LLM_URL=http://192.168.1.100:8080/v1/chat/completions
+LLM_MODEL=qwen3.5-35b
+```
+
+**Ollama:**
+```env
+LLM_BACKEND=ollama
+LLM_URL=http://192.168.1.100:11434/v1/chat/completions
+LLM_MODEL=qwen3:32b
+```
+
+**vLLM:**
+```env
+LLM_BACKEND=vllm
+LLM_URL=http://192.168.1.100:8000/v1/chat/completions
+LLM_MODEL=Qwen/Qwen3.5-32B-AWQ
+LLM_API_KEY=your-api-key
+```
+
+**Generic** (any OpenAI-compatible API):
+```env
+LLM_BACKEND=generic
+LLM_URL=https://api.example.com/v1/chat/completions
+LLM_MODEL=your-model
+LLM_API_KEY=your-key
+```
 
 ## Urgency Scoring
 
