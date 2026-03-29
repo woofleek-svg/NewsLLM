@@ -429,7 +429,7 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
         out += f"""\
 <tr>
 <td style="padding: 20px 32px 0 32px;">
-  <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.5;">{intro}</p>
+  <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.5;">{html.escape(intro)}</p>
 </td>
 </tr>
 """
