@@ -92,6 +92,8 @@ services:
       OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
       SMTP_USER: ${SMTP_USER}
       SMTP_PASSWORD: ${SMTP_PASSWORD}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
       EMAIL_RECIPIENTS: ${EMAIL_RECIPIENTS}
     ports:
       - "8100:8000"

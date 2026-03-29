@@ -4,6 +4,7 @@ Exposes progressive discovery tools over the processed news database.
 Designed for nested search: discover sources → browse briefings → drill into articles.
 """
 
+import html
 import json
 import logging
 import os
@@ -19,6 +20,8 @@ from mcp.server.fastmcp import FastMCP
 log = logging.getLogger("mcp-server")
 
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 EMAIL_RECIPIENTS = [e.strip() for e in os.environ.get("EMAIL_RECIPIENTS", "").split(",") if e.strip()]
@@ -403,15 +406,16 @@ def _build_briefing_html(articles: list[dict], intro: str = "") -> str:
 </tr>
 """
         for i, a in enumerate(section_articles):
-            title = a.get("original_title", a.get("title", "Untitled"))
-            url = a.get("original_url", a.get("url", "#"))
-            summary = a.get("summary", "")
-            source = a.get("source_feed", a.get("source", ""))
-            image_url = a.get("image_url")
+            title = html.escape(a.get("original_title", a.get("title", "Untitled")))
+            url = html.escape(a.get("original_url", a.get("url", "#")), quote=True)
+            summary = html.escape(a.get("summary", ""))
+            source = html.escape(a.get("source_feed", a.get("source", "")))
+            raw_image = a.get("image_url")
+            image_url = html.escape(raw_image, quote=True) if raw_image else None
             tags = a.get("tags", [])
             tag_html = ""
             for t in tags[:4]:
-                tag_html += f'<span style="display: inline-block; background: #e2e8f0; color: #475569; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px;">{t}</span>'
+                tag_html += f'<span style="display: inline-block; background: #e2e8f0; color: #475569; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px;">{html.escape(t)}</span>'
 
             border_bottom = f'border-bottom: 1px solid #e2e8f0;' if i < len(section_articles) - 1 else ''
 
@@ -524,7 +528,7 @@ def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict
     msg.attach(MIMEText(html, "html"))
 
     try:
-        with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
             server.starttls()
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, to_addrs, msg.as_string())
@@ -616,15 +620,15 @@ def send_email(subject: str, body: str, recipients: list[str] | None = None) -> 
     """
     to_addrs = recipients if recipients else EMAIL_RECIPIENTS
 
-    html = f"""\
+    html_body = f"""\
 <html><body style="font-family: -apple-system, Arial, sans-serif; max-width: 680px; margin: 0 auto;">
 <h2 style="border-bottom: 2px solid #2563eb; padding-bottom: 8px;">NewsLLM</h2>
-<p>{body}</p>
+<p>{html.escape(body)}</p>
 <hr style="border: none; border-top: 1px solid #e5e7eb;">
 <p style="font-size: 11px; color: #9ca3af;">Sent by NewsLLM — AI News Aggregator</p>
 </body></html>"""
 
-    return _send_smtp(subject, html, body, to_addrs)
+    return _send_smtp(subject, html_body, body, to_addrs)
 
 
 if __name__ == "__main__":
