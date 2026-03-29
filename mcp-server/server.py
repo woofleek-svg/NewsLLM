@@ -396,7 +396,7 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
     notable = [a for a in articles if a.get("urgency_score", a.get("urgency", 1)) == 2]
     routine = [a for a in articles if a.get("urgency_score", a.get("urgency", 1)) == 1]
 
-    html = f"""\
+    out = f"""\
 <html>
 <body style="margin: 0; padding: 0; background-color: {t['bg_outer']}; font-family: {t['font']};">
 
@@ -426,7 +426,7 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
 """
 
     if intro:
-        html += f"""\
+        out += f"""\
 <tr>
 <td style="padding: 20px 32px 0 32px;">
   <p style="margin: 0; color: #64748b; font-size: 14px; line-height: 1.5;">{intro}</p>
@@ -500,11 +500,11 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
 """
         return s
 
-    html += _render_section(breaking, "Breaking News", "#ef4444", "#fef2f2", "&#9888;")
-    html += _render_section(notable, "Notable Stories", "#f59e0b", "#fffbeb", "&#9733;")
-    html += _render_section(routine, "Latest News", "#64748b", "#f8fafc", "&#9679;")
+    out += _render_section(breaking, "Breaking News", "#ef4444", "#fef2f2", "&#9888;")
+    out += _render_section(notable, "Notable Stories", "#f59e0b", "#fffbeb", "&#9733;")
+    out += _render_section(routine, "Latest News", "#64748b", "#f8fafc", "&#9679;")
 
-    html += f"""\
+    out += f"""\
 <!-- Footer -->
 <tr>
 <td style="background: {t['footer_bg']}; padding: 20px 32px; border-top: 1px solid #e2e8f0;">
@@ -530,7 +530,7 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
 
 </body>
 </html>"""
-    return html
+    return out
 
 
 def _build_plain_text(articles: list[dict], intro: str = "") -> str:
