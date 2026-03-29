@@ -10,6 +10,7 @@ import os
 import re
 import sys
 import time
+import urllib.parse
 
 import psycopg2
 import psycopg2.extras
@@ -193,13 +194,24 @@ def extract_image_url(entry: dict) -> str | None:
         mime = enc.get("mime_type", "")
         url = enc.get("url", "")
         if mime.startswith("image/") and url:
-            return url
+            try:
+                parsed = urllib.parse.urlparse(url)
+                if parsed.scheme in ("http", "https"):
+                    return url
+            except ValueError:
+                pass
 
     # Fall back to first img tag in content
     content = entry.get("content", "")
     match = re.search(r'<img[^>]+src=["\']([^"\']+)', content)
     if match:
-        return match.group(1)
+        url = match.group(1)
+        try:
+            parsed = urllib.parse.urlparse(url)
+            if parsed.scheme in ("http", "https"):
+                return url
+        except ValueError:
+            pass
 
     return None
 
