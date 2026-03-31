@@ -72,15 +72,16 @@ The MCP server exposes these tools for AI clients:
 
 | Tool | Description |
 |---|---|
-| `list_sources()` | Discover available categories and feeds |
-| `get_briefing(category, hours, limit)` | Recent articles sorted by urgency |
-| `search_news(query, category, urgency_min)` | Keyword/tag search with relevance ranking |
-| `get_article(article_id)` | Full details for a specific article |
-| `get_breaking(hours)` | Urgency=3 alerts only |
-| `get_stats()` | Pipeline health and article counts |
-| `list_themes()` | List available email themes |
-| `email_briefing(subject, category, theme, ...)` | Build and send a themed HTML briefing email |
-| `send_email(subject, body)` | Send a short custom notification |
+| `list_sources()` | List all available news categories and feeds with article counts |
+| `get_briefing(category, hours, limit)` | Get a briefing of recent articles, prioritized by urgency |
+| `search_news(query, category, urgency_min, limit)` | Keyword/tag search with relevance ranking |
+| `get_article(article_id)` | Get full details for a specific article by its ID |
+| `get_breaking(hours)` | Check for breaking news alerts (urgency score 3) |
+| `get_stats()` | Get a quick overview of the news database |
+| `list_themes()` | List available email themes with their names and color descriptions |
+| `email_briefing(subject, category, hours, limit, intro, theme, recipients)` | Build and email a themed HTML news briefing directly from the database |
+| `send_email(subject, body, recipients)` | Send a short custom email notification |
+
 
 ### Connecting an MCP Client
 
@@ -148,6 +149,7 @@ Key settings:
 | `LLM_API_KEY` | — | Bearer token (required for vLLM with auth) |
 | `POLL_INTERVAL` | `300` | Seconds between Miniflux polls |
 | `MAX_CONTENT_LENGTH` | `64000` | Max article chars sent to the LLM |
+| `MAX_RETRIES` | `1` | Retries on malformed LLM output before writing to failed_articles |
 | `SMTP_HOST` | `smtp.gmail.com` | SMTP server hostname |
 | `SMTP_PORT` | `587` | SMTP server port |
 | `SMTP_USER` / `SMTP_PASSWORD` | — | SMTP credentials for email briefings |
@@ -243,7 +245,7 @@ NewsLLM/
 │   └── themes.json           # Email theme definitions (hot-reloaded)
 └── ai-news-aggregator-implementation-plan.md
 ```
-##Example Image
+## Example Image
 <img width="1318" height="2014" alt="image" src="https://github.com/user-attachments/assets/8690e869-176a-4075-a2c1-4b02e6dd3cd7" />
 
 ## License
