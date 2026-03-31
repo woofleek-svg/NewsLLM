@@ -271,6 +271,17 @@ def get_already_processed_ids(cur, miniflux_ids: list[int]) -> set[int]:
 def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, processing_ms: int) -> None:
     """Insert a successfully processed article."""
     image_url = extract_image_url(entry)
+    original_url = entry.get("url")
+    if original_url:
+        try:
+            parsed_url = urllib.parse.urlparse(original_url)
+            if parsed_url.scheme not in ("http", "https"):
+                original_url = "#"
+        except ValueError:
+            original_url = "#"
+    else:
+        original_url = "#"
+
     cur.execute(
         """
         INSERT INTO processed_articles
@@ -285,7 +296,7 @@ def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, 
             entry.get("feed", {}).get("title", "unknown"),
             entry.get("feed", {}).get("category", {}).get("title"),
             entry["title"],
-            entry["url"],
+            original_url,
             entry["published_at"],
             image_url,
             llm_output["summary"],

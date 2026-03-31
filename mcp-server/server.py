@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import smtplib
+import urllib.parse
 from contextlib import contextmanager
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -387,6 +388,17 @@ def _get_theme(theme_name: str = "default") -> dict:
     return {**DEFAULT_THEME, **themes.get("default", {})}
 
 
+def _is_safe_url(url: str) -> bool:
+    """Check if a URL has a safe scheme (http or https)."""
+    if not url:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(url)
+        return parsed.scheme in ("http", "https")
+    except ValueError:
+        return False
+
+
 def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str = "default") -> str:
     """Build a news-site styled HTML email from a list of article dicts."""
     t = _get_theme(theme_name)
@@ -452,11 +464,12 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
 """
         for i, a in enumerate(section_articles):
             title = html.escape(a.get("original_title", a.get("title", "Untitled")))
-            url = html.escape(a.get("original_url", a.get("url", "#")), quote=True)
+            raw_url = a.get("original_url", a.get("url", "#"))
+            url = html.escape(raw_url, quote=True) if _is_safe_url(raw_url) else "#"
             summary = html.escape(a.get("summary", ""))
             source = html.escape(a.get("source_feed", a.get("source", "")))
             raw_image = a.get("image_url")
-            image_url = html.escape(raw_image, quote=True) if raw_image else None
+            image_url = html.escape(raw_image, quote=True) if raw_image and _is_safe_url(raw_image) else None
             tags = a.get("tags", [])
             tag_html = ""
             for tag in tags[:4]:
