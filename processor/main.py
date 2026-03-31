@@ -67,6 +67,8 @@ Alert fatigue is worse than a missed notification.
 
 Respond with ONLY the JSON object."""
 
+IMG_RE = re.compile(r'<img[^>]+src=["\']([^"\']+)')
+
 # ---------------------------------------------------------------------------
 # Miniflux client
 # ---------------------------------------------------------------------------
@@ -234,7 +236,7 @@ def extract_image_url(entry: dict) -> str | None:
 
     # Fall back to first img tag in content
     content = entry.get("content", "")
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)', content)
+    match = IMG_RE.search(content)
     if match:
         url = match.group(1)
         try:
