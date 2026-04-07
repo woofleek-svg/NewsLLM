@@ -29,9 +29,9 @@ log = logging.getLogger("news-processor")
 
 MINIFLUX_URL = os.environ["MINIFLUX_URL"]
 MINIFLUX_API_KEY = os.environ["MINIFLUX_API_KEY"]
-LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL")  # LLAMA_CPP_URL kept for backwards compat
+LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"  # LLAMA_CPP_URL kept for backwards compat
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
-LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | ollama | vllm | generic
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "litellm")  # litellm | llama.cpp | ollama | vllm | generic
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
@@ -128,7 +128,9 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     }
 
     # Backend-specific options
-    if LLM_BACKEND == "llama.cpp":
+    if LLM_BACKEND == "litellm":
+        payload["max_tokens"] = 1024
+    elif LLM_BACKEND == "llama.cpp":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
     elif LLM_BACKEND == "vllm":
         payload["max_tokens"] = 1024
