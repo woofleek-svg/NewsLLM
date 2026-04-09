@@ -72,7 +72,7 @@ services:
       MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
       LLM_URL: ${LLM_URL:-${LLAMA_CPP_URL}}
       LLM_MODEL: ${LLM_MODEL:-${LLAMA_MODEL}}
-      LLM_BACKEND: ${LLM_BACKEND:-llama.cpp}
+      LLM_BACKEND: ${LLM_BACKEND:-litellm}
       LLM_API_KEY: ${LLM_API_KEY:-}
       OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
       POLL_INTERVAL: ${POLL_INTERVAL}
