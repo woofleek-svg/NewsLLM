@@ -29,14 +29,18 @@ log = logging.getLogger("news-processor")
 
 MINIFLUX_URL = os.environ["MINIFLUX_URL"]
 MINIFLUX_API_KEY = os.environ["MINIFLUX_API_KEY"]
-LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"  # LLAMA_CPP_URL kept for backwards compat
+LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
-LLM_BACKEND = os.environ.get("LLM_BACKEND", "litellm")  # litellm | llama.cpp | ollama | vllm | generic
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "litellm")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "1"))
+PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
+
+if PURGE_INTERVAL_HOURS <= 0:
+    raise ValueError("PURGE_INTERVAL_HOURS must be a positive integer.")
 
 SYSTEM_PROMPT = """\
 You are a news analysis assistant. You will receive a news article and must \
@@ -314,10 +318,10 @@ def insert_failed_article(cur, entry: dict, error: str, raw_text: str | None = N
 
 
 def purge_old_records(cur) -> int:
-    """Delete records older than 48 hours. Returns total rows deleted."""
-    cur.execute("DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '48 hours'")
+    """Delete records older than the configured interval. Returns total rows deleted."""
+    cur.execute(f"DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
     count = cur.rowcount
-    cur.execute("DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '48 hours'")
+    cur.execute(f"DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
     count += cur.rowcount
     return count
 
@@ -425,7 +429,7 @@ def run_cycle() -> None:
             purged = purge_old_records(cur)
             conn.commit()
             if purged:
-                log.info("Purged %d records older than 48 hours", purged)
+                log.info("Purged %d records older than %d hours", purged, PURGE_INTERVAL_HOURS)
     finally:
         conn.close()
 
