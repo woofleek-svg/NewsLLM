@@ -29,13 +29,18 @@ log = logging.getLogger("news-processor")
 
 MINIFLUX_URL = os.environ["MINIFLUX_URL"]
 MINIFLUX_API_KEY = os.environ["MINIFLUX_API_KEY"]
-LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"  # LLAMA_CPP_URL kept for backwards compat
+LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
-LLM_BACKEND = os.environ.get("LLM_BACKEND", "litellm")  # litellm | llama.cpp | ollama | vllm | generic
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "litellm")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
-PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
+MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "1"))
+PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
+
+if PURGE_INTERVAL_HOURS <= 0:
+    raise ValueError("PURGE_INTERVAL_HOURS must be a positive integer.")
 
 SYSTEM_PROMPT = """\
 You are a news analysis assistant. You will receive a news article and must \
@@ -313,10 +318,10 @@ def insert_failed_article(cur, entry: dict, error: str, raw_text: str | None = N
 
 
 def purge_old_records(cur) -> int:
-    """Delete records older than 48 hours. Returns total rows deleted."""
-    cur.execute("DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '48 hours'")
+    """Delete records older than the configured interval. Returns total rows deleted."""
+    cur.execute(f"DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
     count = cur.rowcount
-    cur.execute("DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '48 hours'")
+    cur.execute(f"DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
     count += cur.rowcount
     return count
 
@@ -373,17 +378,53 @@ def process_entry(cur, entry: dict, processed_ids: set[int]) -> None:
 
         insert_processed_article(cur, entry, llm_output, raw_text, processing_ms)
         log.info("Processed article %d: %s (urgency=%d, %dms)", miniflux_id, title, llm_output["urgency_score"], processing_ms)
-def purge_old_records(cur) -> int:
-    """Delete records older than the configured interval. Returns total rows deleted."""
-    cur.execute(f"DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
-    count = cur.rowcount
-    cur.execute(f"DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
-    count += cur.rowcount
-    return count
+        mark_entry_read(miniflux_id)
+        return
+
+    # All retries exhausted (malformed output, not connectivity)
+    insert_failed_article(cur, entry, last_error or "Unknown error", raw_text)
+    log.warning("Article %d written to failed_articles: %s", miniflux_id, last_error)
+    mark_entry_read(miniflux_id)
+
 
 def run_cycle() -> None:
     """Run one processing cycle: fetch, process, purge."""
-    # ... (rest of the function)
+    try:
+        entries = fetch_unread_entries()
+    except requests.RequestException as exc:
+        log.warning("Miniflux API unreachable: %s — will retry next cycle", exc)
+        return
+
+    if not entries:
+        log.info("No unread entries")
+        return
+
+    log.info("Fetched %d unread entries", len(entries))
+
+    try:
+        conn = get_db_connection()
+        conn.autocommit = False
+    except psycopg2.Error as exc:
+        log.critical("Output database unreachable: %s — halting cycle", exc)
+        return
+
+    try:
+        with conn.cursor() as cur:
+            # Batch check already processed articles
+            processed_ids = get_already_processed_ids(cur, [e["id"] for e in entries])
+
+            for entry in entries:
+                try:
+                    process_entry(cur, entry, processed_ids)
+                    conn.commit()
+                except LLMUnavailableError:
+                    conn.rollback()
+                    log.warning("LLM server down — skipping remaining %d entries, will retry next cycle", len(entries))
+                    break
+                except Exception:
+                    conn.rollback()
+                    log.exception("Unexpected error processing entry %s", entry.get("id"))
+
             # Purge old records at end of cycle
             purged = purge_old_records(cur)
             conn.commit()
