@@ -234,17 +234,16 @@ def extract_image_url(entry: dict) -> str | None:
             except ValueError:
                 pass
 
-    # Fall back to first img tag in content
+    # Fall back to first valid img tag in content
     content = entry.get("content", "")
-    match = re.search(r'<img[^>]+src=["\']([^"\']+)', content)
-    if match:
+    for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)', content):
         url = match.group(1)
         try:
             parsed = urllib.parse.urlparse(url)
             if parsed.scheme in ("http", "https"):
                 return _optimize_image_url(url)
         except ValueError:
-            pass
+            continue
 
     return None
 
