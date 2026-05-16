@@ -143,7 +143,7 @@ Key settings:
 
 | Variable | Default | Description |
 |---|---|---|
-| `LLM_BACKEND` | `llama.cpp` | Backend type: `llama.cpp`, `ollama`, `vllm`, or `generic` |
+| `LLM_BACKEND` | `llama.cpp` | Backend type: `llama.cpp`, `litellm`, `ollama`, `vllm`, or `generic` |
 | `LLM_URL` | — | Chat completions endpoint (see examples below) |
 | `LLM_MODEL` | `qwen3.5-35b` | Model name passed to the API |
 | `LLM_API_KEY` | — | Bearer token (required for vLLM with auth) |
@@ -157,7 +157,14 @@ Key settings:
 
 ### LLM Backend Examples
 
-**llama.cpp** (default):
+**LiteLLM** (proxied local models):
+```env
+LLM_BACKEND=litellm
+LLM_URL=http://192.168.1.100:8080/v1/chat/completions
+LLM_MODEL=qwen3.5-35b
+```
+
+**llama.cpp:**
 ```env
 LLM_BACKEND=llama.cpp
 LLM_URL=http://192.168.1.100:8080/v1/chat/completions

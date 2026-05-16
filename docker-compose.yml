@@ -72,7 +72,7 @@ services:
       MINIFLUX_API_KEY: ${MINIFLUX_API_KEY}
       LLM_URL: ${LLM_URL:-${LLAMA_CPP_URL}}
       LLM_MODEL: ${LLM_MODEL:-${LLAMA_MODEL}}
-      LLM_BACKEND: ${LLM_BACKEND:-litellm}
+      LLM_BACKEND: ${LLM_BACKEND:-llama.cpp}
       LLM_API_KEY: ${LLM_API_KEY:-}
       OUTPUT_DB_URL: postgresql://newsagent:${OUTPUT_DB_PASSWORD}@postgres-output:5432/news_output
       POLL_INTERVAL: ${POLL_INTERVAL}
@@ -80,6 +80,12 @@ services:
       MAX_RETRIES: ${MAX_RETRIES}
     networks:
       - processing
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f main.py || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   # --- MCP Layer ---
   mcp-server:
@@ -101,6 +107,12 @@ services:
       - "8100:8000"
     networks:
       - mcp
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f server.py || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   miniflux_data:
