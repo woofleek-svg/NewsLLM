@@ -187,6 +187,9 @@ def validate_llm_output(data: dict) -> str | None:
 def _optimize_image_url(url: str) -> str:
     """Rewrite image URLs to request a smaller version where the CDN supports it."""
     parsed = urllib.parse.urlparse(url)
+    if not parsed.hostname:
+        return url
+
     params = urllib.parse.parse_qs(parsed.query)
 
     # WordPress (wp.com / i0.wp.com) — use w= or resize= param

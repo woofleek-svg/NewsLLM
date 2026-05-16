@@ -197,7 +197,11 @@ def search_news(
     urgency_min = min(max(urgency_min, 1), 3)
 
     with get_db() as cur:
-        params = [query, f"%{query}%", f"%{query}%", f"%{query}%", urgency_min]
+        params = [
+            query, f"%{query}%", f"%{query}%",           # CASE
+            query, f"%{query}%", f"%{query}%", f"%{query}%",  # WHERE
+            urgency_min
+        ]
         category_clause = ""
         if category:
             category_clause = "AND category ILIKE %s"
@@ -223,9 +227,7 @@ def search_news(
             {category_clause}
             ORDER BY relevance DESC, urgency_score DESC, processed_at DESC
             LIMIT %s
-        """, [query, f"%{query}%", f"%{query}%",
-              query, f"%{query}%", f"%{query}%", f"%{query}%",
-              urgency_min] + ([category] if category else []) + [limit])
+        """, params)
 
         return [_format_article_summary(row) for row in cur.fetchall()]
 
