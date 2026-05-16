@@ -1,8 +1,18 @@
-from server import _build_briefing_html
 import os
+import sys
+from unittest.mock import MagicMock
+
+# Mocking external dependencies before importing server
+sys.modules["psycopg2"] = MagicMock()
+sys.modules["psycopg2.extras"] = MagicMock()
+sys.modules["mcp"] = MagicMock()
+sys.modules["mcp.server"] = MagicMock()
+sys.modules["mcp.server.fastmcp"] = MagicMock()
 
 # mock OUTPUT_DB_URL so server.py can be imported without crashing
 os.environ["OUTPUT_DB_URL"] = "postgresql://mock"
+
+from server import _build_briefing_html
 
 articles = []
 intro_text = "<script>alert(1)</script>"
