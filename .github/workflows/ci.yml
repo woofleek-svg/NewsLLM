@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint processor
+        run: |
+          ruff check processor/ \
+            --output-format=github \
+            --target-version=py312 \
+            --select=E,F \
+            --ignore=F401,F821 \
+            || true
+
+      - name: Lint mcp-server
+        run: |
+          ruff check mcp-server/ \
+            --output-format=github \
+            --target-version=py312 \
+            --select=E,F \
+            --ignore=F401,F821 \
+            || true
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test processor
+        run: |
+          set -e
+          cd processor
+          pip install -q -r requirements.txt
+          python3 -m pytest . -v --tb=short
+
+      - name: Test mcp-server
+        run: |
+          set -e
+          cd mcp-server
+          pip install -q -r requirements.txt
+          python3 -m pytest . -v --tb=short
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build processor image
+        run: docker build -t news-processor ./processor
+
+      - name: Build MCP server image
+        run: docker build -t news-mcp-server ./mcp-server
