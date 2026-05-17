@@ -27,7 +27,6 @@ jobs:
             --output-format=github \
             --target-version=py312 \
             --select=E,F \
-            --ignore=F401,F821 \
             || true
 
       - name: Lint mcp-server
@@ -36,7 +35,6 @@ jobs:
             --output-format=github \
             --target-version=py312 \
             --select=E,F \
-            --ignore=F401,F821 \
             || true
 
   test:
