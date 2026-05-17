@@ -431,7 +431,6 @@ def process_entry(cur, entry: dict, processed_ids: set[int]) -> None:
             processing_ms = int((time.monotonic() - start) * 1000)
         except requests.RequestException as exc:
             log.error("LLM unreachable for article %d: %s — aborting cycle", miniflux_id, exc)
-            mark_entry_read(miniflux_id)
             raise LLMUnavailableError(str(exc))
 
         if llm_output is None:
