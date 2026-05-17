@@ -167,12 +167,16 @@ class TestPurgeOldRecords:
         assert mock_cur.execute.call_count == 2
 
         first_call_args = mock_cur.execute.call_args_list[0][0][0]
+        first_call_params = mock_cur.execute.call_args_list[0][0][1]
         assert "DELETE FROM processed_articles" in first_call_args
-        assert "48 hours" in first_call_args
+        assert "%s" in first_call_args
+        assert first_call_params == ("48",)
 
         second_call_args = mock_cur.execute.call_args_list[1][0][0]
+        second_call_params = mock_cur.execute.call_args_list[1][0][1]
         assert "DELETE FROM failed_articles" in second_call_args
-        assert "48 hours" in second_call_args
+        assert "%s" in second_call_args
+        assert second_call_params == ("48",)
 
         assert total_deleted == 10  # 5 from processed + 5 from failed
 
