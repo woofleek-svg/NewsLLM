@@ -190,12 +190,16 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     # Backend-specific options
     if LLM_BACKEND == "litellm":
         payload["max_tokens"] = 1024
+        payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "llama.cpp":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "vllm":
         payload["max_tokens"] = 1024
+        payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "ollama":
         payload["options"] = {"num_predict": 1024}
+        payload["format"] = "json"
 
     headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
@@ -209,10 +213,15 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     # Strip thinking tags if the model still emits them
     cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
 
-    # Strip markdown code fences if present
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-        cleaned = re.sub(r"\s*```$", "", cleaned)
+    # Extract JSON from potential surrounding text or markdown fences
+    json_match = re.search(r"({.*})", cleaned, re.DOTALL)
+    if json_match:
+        cleaned = json_match.group(1)
+    else:
+        # Fallback to existing fence stripping if regex fails to find braces
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$", "", cleaned)
 
     try:
         return json.loads(cleaned), raw_text

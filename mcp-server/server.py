@@ -653,15 +653,8 @@ def _build_plain_text(articles: list[dict], intro: str = "") -> str:
     return "\n".join(lines)
 
 
-def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict:
-    """Send an email via Gmail SMTP. Returns status dict."""
-    if not SMTP_USER or not SMTP_PASSWORD:
-        log.error('SMTP credentials not configured')
-        return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
-    if not to_addrs:
-        log.error('No recipients configured')
-        return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
-
+def _send_smtp_worker(subject: str, html: str, plain: str, to_addrs: list[str]) -> None:
+    """Worker function to send email in the background."""
     msg = MIMEMultipart("alternative")
     msg["From"] = f"NewsLLM <{SMTP_USER}>"
     msg["To"] = ", ".join(to_addrs)
@@ -675,10 +668,33 @@ def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, to_addrs, msg.as_string())
         log.info("Email sent to %s: %s", to_addrs, subject)
-        return {"status": "sent", "recipients": to_addrs, "subject": subject}
     except smtplib.SMTPException as exc:
-        log.error("Failed to send email: %s", exc)
-        return {"error": f"SMTP error: {exc}"}
+        log.error("Failed to send email to %s: %s", to_addrs, exc)
+
+
+def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict:
+    """Dispatches an email to be sent in a background thread. Returns status dict."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.error('SMTP credentials not configured')
+        return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
+    if not to_addrs:
+        log.error('No recipients configured')
+        return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
+
+    # Dispatch to background thread to avoid blocking the MCP client
+    thread = threading.Thread(
+        target=_send_smtp_worker,
+        args=(subject, html, plain, to_addrs),
+        daemon=True
+    )
+    thread.start()
+
+    return {
+        "status": "queued",
+        "info": "Email dispatching in background",
+        "recipients": to_addrs,
+        "subject": subject
+    }
 
 
 # ---------------------------------------------------------------------------
