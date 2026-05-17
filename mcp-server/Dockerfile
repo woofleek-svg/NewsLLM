@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY server.py .
 COPY themes.json .
+COPY shared ./shared
 
 EXPOSE 8000
 

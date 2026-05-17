@@ -154,13 +154,13 @@ class TestIntegration(unittest.TestCase):
             self.assertIn(server.DEFAULT_THEME["bg_outer"], html2) # Merged with default missing keys
 
     def test_is_safe_url(self):
-        self.assertTrue(server._is_safe_url("http://example.com"))
-        self.assertTrue(server._is_safe_url("https://example.com"))
-        self.assertFalse(server._is_safe_url("javascript:alert(1)"))
-        self.assertFalse(server._is_safe_url("data:text/html,<html>"))
-        self.assertFalse(server._is_safe_url("file:///etc/passwd"))
-        self.assertFalse(server._is_safe_url(""))
-        self.assertFalse(server._is_safe_url(None))
+        self.assertTrue(server.is_safe_url("http://example.com"))
+        self.assertTrue(server.is_safe_url("https://secure.com"))
+        self.assertFalse(server.is_safe_url("javascript:alert(1)"))
+        self.assertFalse(server.is_safe_url("data:image/png;base64,iVBORw0KGgo"))
+        self.assertFalse(server.is_safe_url("file:///etc/passwd"))
+        self.assertFalse(server.is_safe_url(""))
+        self.assertFalse(server.is_safe_url(None))
 
     def test_send_smtp(self):
         # Restore actual values after test

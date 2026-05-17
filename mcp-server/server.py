@@ -21,6 +21,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 import psycopg2
+
+from shared.urls import is_safe_url
 import psycopg2.extras
 from mcp.server.fastmcp import FastMCP
 
@@ -432,8 +434,6 @@ def get_stats() -> dict:
 # ---------------------------------------------------------------------------
 
 URGENCY_LABELS = {1: "Routine", 2: "Notable", 3: "Breaking"}
-URGENCY_COLORS = {1: "#94a3b8", 2: "#f59e0b", 3: "#ef4444"}
-URGENCY_BG = {1: "#f8fafc", 2: "#fffbeb", 3: "#fef2f2"}
 
 # ---------------------------------------------------------------------------
 # Themes — loaded from themes.json, hot-reloaded on each email send
@@ -477,17 +477,6 @@ def _get_theme(theme_name: str = "default") -> dict:
         merged = {**DEFAULT_THEME, **theme}
         return merged
     return {**DEFAULT_THEME, **themes.get("default", {})}
-
-
-def _is_safe_url(url: str) -> bool:
-    """Check if a URL has a safe scheme (http or https)."""
-    if not url:
-        return False
-    try:
-        parsed = urllib.parse.urlparse(url)
-        return parsed.scheme in ("http", "https")
-    except ValueError:
-        return False
 
 
 def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str = "default") -> str:
@@ -557,11 +546,11 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
         for i, a in enumerate(section_articles):
             title = html.escape(a.get("original_title", a.get("title", "Untitled")))
             raw_url = a.get("original_url", a.get("url", "#"))
-            url = html.escape(raw_url, quote=True) if _is_safe_url(raw_url) else "#"
+            url = html.escape(raw_url, quote=True) if is_safe_url(raw_url) else "#"
             summary = html.escape(a.get("summary", ""))
             source = html.escape(a.get("source_feed", a.get("source", "")))
             raw_image = a.get("image_url")
-            image_url = html.escape(raw_image, quote=True) if raw_image and _is_safe_url(raw_image) else None
+            image_url = html.escape(raw_image, quote=True) if raw_image and is_safe_url(raw_image) else None
             tags = a.get("tags", [])
             tag_html = ""
             for tag in tags[:4]:
