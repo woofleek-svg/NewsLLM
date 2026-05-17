@@ -12,6 +12,7 @@ import smtplib
 import ssl
 import threading
 import time
+import typing
 import urllib.parse
 from contextlib import contextmanager
 from email.mime.multipart import MIMEMultipart
@@ -41,14 +42,16 @@ class EmailRateLimiter:
     Default: 10 emails/minute (configurable via EMAIL_RATE_LIMIT env var).
     """
 
-    def __init__(self, max_emails_per_minute: int = 10, max_burst: int = 15):
+    def __init__(self, max_emails_per_minute: int = 10, max_burst: int = 15) -> None:
+        """Initialize the email rate limiter."""
         self.max_emails = max_emails_per_minute
         self.max_burst = max_burst
         self.tokens = float(max_burst)
         self.last_refill = time.monotonic()
         self.lock = threading.Lock()
 
-    def _refill(self):
+    def _refill(self) -> None:
+        """Refill the token bucket based on elapsed time."""
         now = time.monotonic()
         elapsed = now - self.last_refill
         refill_rate = self.max_emails / 60.0  # tokens per second
@@ -94,7 +97,7 @@ mcp = FastMCP(
 
 
 @contextmanager
-def get_db():
+def get_db() -> typing.Generator[psycopg2.extras.RealDictCursor, None, None]:
     """Yield a database connection with RealDictCursor."""
     conn = psycopg2.connect(OUTPUT_DB_URL)
     try:
@@ -528,7 +531,8 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
 </tr>
 """
 
-    def _render_section(section_articles, section_title, accent_color, bg_color, icon):
+    def _render_section(section_articles: list[dict], section_title: str, accent_color: str, bg_color: str, icon: str) -> str:
+        """Render an HTML section for a group of articles."""
         if not section_articles:
             return ""
         s = f"""\
@@ -557,7 +561,7 @@ def _build_briefing_html(articles: list[dict], intro: str = "", theme_name: str 
             for tag in tags[:4]:
                 tag_html += f'<span style="display: inline-block; background: {t["tag_bg"]}; color: {t["tag_text"]}; font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 10px; margin-right: 4px; margin-bottom: 4px;">{html.escape(tag)}</span>'
 
-            border_bottom = f'border-bottom: 1px solid #e2e8f0;' if i < len(section_articles) - 1 else ''
+            border_bottom = 'border-bottom: 1px solid #e2e8f0;' if i < len(section_articles) - 1 else ''
 
             # Image block — thumbnail floated right if available
             if image_url:
@@ -830,7 +834,8 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
 
 class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self) -> None:
+        """Handle GET requests for health check."""
         if self.path == '/healthz':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -853,11 +858,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: typing.Any) -> None:
+        """Log an arbitrary message."""
         # Suppress access logs for health checks
         pass
 
-def start_health_server():
+def start_health_server() -> None:
+    """Start the background HTTP health server."""
     server = ThreadedHTTPServer(('0.0.0.0', HEALTH_PORT), HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

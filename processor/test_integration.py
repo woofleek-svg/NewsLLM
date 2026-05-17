@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import requests
 import time
 
@@ -168,11 +168,11 @@ class TestPurgeOldRecords:
 
         first_call_args = mock_cur.execute.call_args_list[0][0][0]
         assert "DELETE FROM processed_articles" in first_call_args
-        assert "48 hours" in first_call_args
+        assert mock_cur.execute.call_args_list[0][0][1] == ("48",)
 
         second_call_args = mock_cur.execute.call_args_list[1][0][0]
         assert "DELETE FROM failed_articles" in second_call_args
-        assert "48 hours" in second_call_args
+        assert mock_cur.execute.call_args_list[1][0][1] == ("48",)
 
         assert total_deleted == 10  # 5 from processed + 5 from failed
 

@@ -11,6 +11,7 @@ import re
 import sys
 import time
 import threading
+import typing
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
@@ -93,7 +94,8 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
 
 class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
+    def do_GET(self) -> None:
+        """Handle GET requests for health check."""
         if self.path == '/healthz':
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -117,11 +119,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def log_message(self, format, *args):
+    def log_message(self, format: str, *args: typing.Any) -> None:
+        """Log an arbitrary message."""
         # Suppress access logs for health checks
         pass
 
-def start_health_server():
+def start_health_server() -> None:
+    """Start the background HTTP health server."""
     server = ThreadedHTTPServer(('0.0.0.0', HEALTH_PORT), HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -316,12 +320,12 @@ def extract_image_url(entry: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def get_db_connection():
+def get_db_connection() -> psycopg2.extensions.connection:
     """Create a new database connection."""
     return psycopg2.connect(OUTPUT_DB_URL)
 
 
-def get_already_processed_ids(cur, miniflux_ids: list[int]) -> set[int]:
+def get_already_processed_ids(cur: psycopg2.extensions.cursor, miniflux_ids: list[int]) -> set[int]:
     """Check which of the given Miniflux IDs have already been processed."""
     if not miniflux_ids:
         return set()
@@ -332,7 +336,7 @@ def get_already_processed_ids(cur, miniflux_ids: list[int]) -> set[int]:
     return {row[0] for row in cur.fetchall()}
 
 
-def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, processing_ms: int) -> None:
+def insert_processed_article(cur: psycopg2.extensions.cursor, entry: dict, llm_output: dict, raw_text: str, processing_ms: int) -> None:
     """Insert a successfully processed article."""
     image_url = extract_image_url(entry)
     original_url = entry.get("url")
@@ -374,7 +378,7 @@ def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, 
     )
 
 
-def insert_failed_article(cur, entry: dict, error: str, raw_text: str | None = None) -> None:
+def insert_failed_article(cur: psycopg2.extensions.cursor, entry: dict, error: str, raw_text: str | None = None) -> None:
     """Insert a failed article into the dead letter table."""
     cur.execute(
         """
@@ -386,7 +390,7 @@ def insert_failed_article(cur, entry: dict, error: str, raw_text: str | None = N
     )
 
 
-def purge_old_records(cur) -> int:
+def purge_old_records(cur: psycopg2.extensions.cursor) -> int:
     """Delete records older than the configured interval. Returns total rows deleted."""
     cur.execute("DELETE FROM processed_articles WHERE processed_at < NOW() - (%s || ' hours')::interval", (str(PURGE_INTERVAL_HOURS),))
     count = cur.rowcount
@@ -404,7 +408,7 @@ class LLMUnavailableError(Exception):
     """Raised when the LLM server is unreachable or times out."""
 
 
-def process_entry(cur, entry: dict, processed_ids: set[int]) -> None:
+def process_entry(cur: psycopg2.extensions.cursor, entry: dict, processed_ids: set[int]) -> None:
     """Process a single Miniflux entry through the LLM pipeline.
 
     Raises LLMUnavailableError if the LLM server can't be reached,
@@ -504,6 +508,7 @@ def run_cycle() -> None:
 
 
 def main() -> None:
+    """Run the news processor service."""
     if not LLM_URL:
         log.critical("LLM_URL (or LLAMA_CPP_URL) environment variable is not set — cannot start")
         sys.exit(1)
