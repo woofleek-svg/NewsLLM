@@ -2,7 +2,7 @@ import sys
 import os
 import json
 import pytest
-from unittest.mock import patch, MagicMock, call
+from unittest.mock import patch, MagicMock
 import requests
 import time
 
@@ -20,12 +20,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import main
 
 class TestRunCycle:
+    """Integration tests for the main processing cycle."""
     @patch("main.fetch_unread_entries")
     @patch("main.get_db_connection")
     @patch("main.get_already_processed_ids")
     @patch("main.process_entry")
     @patch("main.purge_old_records")
     def test_run_cycle_success(self, mock_purge, mock_process, mock_get_processed, mock_get_db, mock_fetch):
+        """Test a successful processing cycle with articles."""
         # Setup mocks
         entries = [{"id": 1, "title": "Article 1"}, {"id": 2, "title": "Article 2"}]
         mock_fetch.return_value = entries
@@ -56,6 +58,7 @@ class TestRunCycle:
 
     @patch("main.fetch_unread_entries")
     def test_run_cycle_no_entries(self, mock_fetch):
+        """Test cycle when no new entries are available."""
         mock_fetch.return_value = []
 
         with patch("main.get_db_connection") as mock_get_db:
@@ -65,6 +68,7 @@ class TestRunCycle:
 
     @patch("main.fetch_unread_entries")
     def test_run_cycle_miniflux_unreachable(self, mock_fetch):
+        """Test cycle when Miniflux API is unreachable."""
         mock_fetch.side_effect = requests.RequestException("Timeout")
 
         with patch("main.get_db_connection") as mock_get_db:
@@ -77,6 +81,7 @@ class TestRunCycle:
     @patch("main.get_already_processed_ids")
     @patch("main.process_entry")
     def test_run_cycle_llm_unavailable_aborts(self, mock_process, mock_get_processed, mock_get_db, mock_fetch):
+        """Test that cycle aborts if LLM server is down."""
         entries = [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}]
         mock_fetch.return_value = entries
 
@@ -96,6 +101,7 @@ class TestRunCycle:
         mock_conn.rollback.assert_called_once()
 
 class TestProcessEntry:
+    """Tests for processing a single entry."""
     def setup_method(self, method):
         self.entry = {
             "id": 123,
@@ -110,6 +116,7 @@ class TestProcessEntry:
     @patch("main.insert_processed_article")
     @patch("main.mark_entry_read")
     def test_process_entry_success(self, mock_mark_read, mock_insert, mock_call_llm):
+        """Test successful processing of a single article."""
         valid_llm_output = {
             "summary": "Sum",
             "tags": ["tech"],
@@ -128,6 +135,7 @@ class TestProcessEntry:
     @patch("main.insert_failed_article")
     @patch("main.mark_entry_read")
     def test_process_entry_parse_failure(self, mock_mark_read, mock_insert_failed, mock_call_llm):
+        """Test article processing when LLM returns non-JSON output."""
         # call_llm returns (None, raw_text) on parse failure
         mock_call_llm.return_value = (None, "I am not JSON")
 
@@ -141,6 +149,7 @@ class TestProcessEntry:
     @patch("main.call_llm")
     @patch("main.mark_entry_read")
     def test_process_entry_llm_unreachable(self, mock_mark_read, mock_call_llm):
+        """Test article processing when LLM server is unreachable."""
         mock_call_llm.side_effect = requests.RequestException("Timeout")
 
         with pytest.raises(main.LLMUnavailableError):
@@ -150,6 +159,7 @@ class TestProcessEntry:
 
     @patch("main.call_llm")
     def test_process_entry_already_processed(self, mock_call_llm):
+        """Test that already processed articles are skipped."""
         self.processed_ids.add(123)
 
         main.process_entry(self.mock_cur, self.entry, self.processed_ids)
@@ -157,7 +167,9 @@ class TestProcessEntry:
         mock_call_llm.assert_not_called()
 
 class TestPurgeOldRecords:
+    """Tests for the database purge logic."""
     def test_purge_old_records(self):
+        """Verify that purge calls use correct intervals and tables."""
         mock_cur = MagicMock()
         mock_cur.rowcount = 5
 
@@ -181,6 +193,7 @@ class TestPurgeOldRecords:
         assert total_deleted == 10  # 5 from processed + 5 from failed
 
 class TestHealthServer:
+    """Tests for the internal health check server."""
     @classmethod
     def setup_class(cls):
         # Start health server on a dynamic or known port
@@ -196,6 +209,7 @@ class TestHealthServer:
                 time.sleep(0.1)
 
     def test_healthz_endpoint(self):
+        """Verify that /healthz returns 200 and correct status info."""
         resp = requests.get(f"http://localhost:{main.HEALTH_PORT}/healthz")
         assert resp.status_code == 200
         data = resp.json()
@@ -204,5 +218,6 @@ class TestHealthServer:
         assert data["db_url"] == "postgresql://test:***@localhost/test"
 
     def test_non_healthz_endpoint(self):
+        """Verify that unknown endpoints return 404."""
         resp = requests.get(f"http://localhost:{main.HEALTH_PORT}/other")
         assert resp.status_code == 404
