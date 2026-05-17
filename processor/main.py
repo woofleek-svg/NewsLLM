@@ -388,9 +388,9 @@ def insert_failed_article(cur, entry: dict, error: str, raw_text: str | None = N
 
 def purge_old_records(cur) -> int:
     """Delete records older than the configured interval. Returns total rows deleted."""
-    cur.execute(f"DELETE FROM processed_articles WHERE processed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
+    cur.execute("DELETE FROM processed_articles WHERE processed_at < NOW() - (%s || ' hours')::interval", (str(PURGE_INTERVAL_HOURS),))
     count = cur.rowcount
-    cur.execute(f"DELETE FROM failed_articles WHERE failed_at < NOW() - INTERVAL '{PURGE_INTERVAL_HOURS} hours'")
+    cur.execute("DELETE FROM failed_articles WHERE failed_at < NOW() - (%s || ' hours')::interval", (str(PURGE_INTERVAL_HOURS),))
     count += cur.rowcount
     return count
 
