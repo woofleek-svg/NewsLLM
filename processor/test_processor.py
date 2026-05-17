@@ -191,12 +191,8 @@ class TestImageExtraction:
         entry = {
             "content": '<img src="data:image/png;base64,123"><img src="https://example.com/content.jpg">'
         }
-        # The regex just grabs the first one, which is invalid, so it should return None currently if the first match fails the check.
-        # Actually, let's verify what main.py does:
-        # match = re.search(r'<img[^>]+src=["\']([^"\']+)', content)
-        # if match: ... check ... return
-        # It doesn't loop over all img tags, it only checks the FIRST img tag.
-        assert main.extract_image_url(entry) is None
+        # The logic loops over all img tags and returns the first valid one
+        assert main.extract_image_url(entry) == "https://example.com/content.jpg"
 
     def test_extract_image_url_none(self):
         entry = {"content": "<p>No images</p>"}
