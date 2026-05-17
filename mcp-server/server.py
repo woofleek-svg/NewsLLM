@@ -220,6 +220,30 @@ def list_sources() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _query_articles(cur: psycopg2.extensions.cursor, category: str = "", hours: int = 24, limit: int = 20) -> list[dict]:
+    """Helper to query articles with category, time, and limit filters."""
+    hours = min(max(hours, 1), 48)
+    limit = min(max(limit, 1), 50)
+
+    if category:
+        cur.execute("""
+            SELECT * FROM processed_articles
+            WHERE processed_at > NOW() - make_interval(hours => %s)
+              AND category ILIKE %s
+            ORDER BY urgency_score DESC, processed_at DESC
+            LIMIT %s
+        """, (hours, category, limit))
+    else:
+        cur.execute("""
+            SELECT * FROM processed_articles
+            WHERE processed_at > NOW() - make_interval(hours => %s)
+            ORDER BY urgency_score DESC, processed_at DESC
+            LIMIT %s
+        """, (hours, limit))
+
+    return cur.fetchall()
+
+
 @mcp.tool()
 def get_briefing(category: str = "", hours: int = 24, limit: int = 20) -> list[dict]:
     """Get a briefing of recent articles, prioritized by urgency.
@@ -231,27 +255,9 @@ def get_briefing(category: str = "", hours: int = 24, limit: int = 20) -> list[d
 
     Returns articles sorted by urgency (highest first), then recency.
     """
-    hours = min(max(hours, 1), 48)
-    limit = min(max(limit, 1), 50)
-
     with get_db() as cur:
-        if category:
-            cur.execute("""
-                SELECT * FROM processed_articles
-                WHERE processed_at > NOW() - make_interval(hours => %s)
-                  AND category ILIKE %s
-                ORDER BY urgency_score DESC, processed_at DESC
-                LIMIT %s
-            """, (hours, category, limit))
-        else:
-            cur.execute("""
-                SELECT * FROM processed_articles
-                WHERE processed_at > NOW() - make_interval(hours => %s)
-                ORDER BY urgency_score DESC, processed_at DESC
-                LIMIT %s
-            """, (hours, limit))
-
-        return [_format_article_summary(row) for row in cur.fetchall()]
+        articles = _query_articles(cur, category, hours, limit)
+        return [_format_article_summary(row) for row in articles]
 
 
 # ---------------------------------------------------------------------------
@@ -769,27 +775,8 @@ def email_briefing(
         log.error('No recipients configured')
         return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
 
-    hours = min(max(hours, 1), 48)
-    limit = min(max(limit, 1), 50)
-
     with get_db() as cur:
-        if category:
-            cur.execute("""
-                SELECT * FROM processed_articles
-                WHERE processed_at > NOW() - make_interval(hours => %s)
-                  AND category ILIKE %s
-                ORDER BY urgency_score DESC, processed_at DESC
-                LIMIT %s
-            """, (hours, category, limit))
-        else:
-            cur.execute("""
-                SELECT * FROM processed_articles
-                WHERE processed_at > NOW() - make_interval(hours => %s)
-                ORDER BY urgency_score DESC, processed_at DESC
-                LIMIT %s
-            """, (hours, limit))
-
-        articles = cur.fetchall()
+        articles = _query_articles(cur, category, hours, limit)
 
     if not articles:
         return {"error": "No articles found for the given filters"}

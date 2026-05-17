@@ -24,9 +24,11 @@ class TestRunCycle:
     @patch("main.fetch_unread_entries")
     @patch("main.get_db_connection")
     @patch("main.get_already_processed_ids")
-    @patch("main.process_entry")
+    @patch("main.process_article_task")
+    @patch("main.insert_processed_article")
+    @patch("main.mark_entry_read")
     @patch("main.purge_old_records")
-    def test_run_cycle_success(self, mock_purge, mock_process, mock_get_processed, mock_get_db, mock_fetch):
+    def test_run_cycle_success(self, mock_purge, mock_mark_read, mock_insert, mock_process_task, mock_get_processed, mock_get_db, mock_fetch):
         """Test a successful processing cycle with articles."""
         # Setup mocks
         entries = [{"id": 1, "title": "Article 1"}, {"id": 2, "title": "Article 2"}]
@@ -40,6 +42,12 @@ class TestRunCycle:
         mock_get_processed.return_value = set()
         mock_purge.return_value = 5
 
+        # Mock process_article_task results
+        mock_process_task.side_effect = [
+            {"type": "success", "entry": entries[0], "llm_output": {"urgency_score": 1}, "raw_text": "...", "processing_ms": 100},
+            {"type": "success", "entry": entries[1], "llm_output": {"urgency_score": 2}, "raw_text": "...", "processing_ms": 150}
+        ]
+
         # Execute
         main.run_cycle()
 
@@ -48,12 +56,12 @@ class TestRunCycle:
         mock_get_db.assert_called_once()
         mock_get_processed.assert_called_once_with(mock_cur, [1, 2])
 
-        assert mock_process.call_count == 2
-        mock_process.assert_any_call(mock_cur, entries[0], set())
-        mock_process.assert_any_call(mock_cur, entries[1], set())
+        assert mock_process_task.call_count == 2
+        assert mock_insert.call_count == 2
+        assert mock_mark_read.call_count == 2
 
         mock_purge.assert_called_once_with(mock_cur)
-        assert mock_conn.commit.call_count == 3  # one for each article + one for purge
+        assert mock_conn.commit.call_count == 3  # two articles + one purge
         mock_conn.close.assert_called_once()
 
     @patch("main.fetch_unread_entries")
@@ -76,32 +84,8 @@ class TestRunCycle:
             mock_fetch.assert_called_once()
             mock_get_db.assert_not_called()
 
-    @patch("main.fetch_unread_entries")
-    @patch("main.get_db_connection")
-    @patch("main.get_already_processed_ids")
-    @patch("main.process_entry")
-    def test_run_cycle_llm_unavailable_aborts(self, mock_process, mock_get_processed, mock_get_db, mock_fetch):
-        """Test that cycle aborts if LLM server is down."""
-        entries = [{"id": 1, "title": "A"}, {"id": 2, "title": "B"}]
-        mock_fetch.return_value = entries
-
-        mock_conn = MagicMock()
-        mock_get_db.return_value = mock_conn
-        mock_cur = MagicMock()
-        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
-
-        mock_get_processed.return_value = set()
-
-        # Make the first article raise LLMUnavailableError
-        mock_process.side_effect = main.LLMUnavailableError("LLM down")
-
-        main.run_cycle()
-
-        mock_process.assert_called_once_with(mock_cur, entries[0], set())
-        mock_conn.rollback.assert_called_once()
-
-class TestProcessEntry:
-    """Tests for processing a single entry."""
+class TestProcessArticleTask:
+    """Tests for the individual article processing task."""
     def setup_method(self, method):
         self.entry = {
             "id": 123,
@@ -109,14 +93,10 @@ class TestProcessEntry:
             "content": "Content",
             "feed": {"title": "Test Feed", "category": {"title": "Tech"}}
         }
-        self.mock_cur = MagicMock()
-        self.processed_ids = set()
 
     @patch("main.call_llm")
-    @patch("main.insert_processed_article")
-    @patch("main.mark_entry_read")
-    def test_process_entry_success(self, mock_mark_read, mock_insert, mock_call_llm):
-        """Test successful processing of a single article."""
+    def test_process_article_task_success(self, mock_call_llm):
+        """Test successful task execution."""
         valid_llm_output = {
             "summary": "Sum",
             "tags": ["tech"],
@@ -125,46 +105,34 @@ class TestProcessEntry:
         }
         mock_call_llm.return_value = (valid_llm_output, json.dumps(valid_llm_output))
 
-        main.process_entry(self.mock_cur, self.entry, self.processed_ids)
+        result = main.process_article_task(self.entry)
 
+        assert result["type"] == "success"
+        assert result["entry"] == self.entry
+        assert result["llm_output"] == valid_llm_output
         mock_call_llm.assert_called_once_with("Tech", "Test Article", "Test Feed", "Content")
-        mock_insert.assert_called_once()
-        mock_mark_read.assert_called_once_with(123)
 
     @patch("main.call_llm")
-    @patch("main.insert_failed_article")
-    @patch("main.mark_entry_read")
-    def test_process_entry_parse_failure(self, mock_mark_read, mock_insert_failed, mock_call_llm):
-        """Test article processing when LLM returns non-JSON output."""
-        # call_llm returns (None, raw_text) on parse failure
+    def test_process_article_task_parse_failure(self, mock_call_llm):
+        """Test task when LLM returns non-JSON output."""
         mock_call_llm.return_value = (None, "I am not JSON")
 
-        main.process_entry(self.mock_cur, self.entry, self.processed_ids)
+        result = main.process_article_task(self.entry)
 
-        # Should be called MAX_RETRIES + 1 times (MAX_RETRIES is 1 by default, so 2 times)
+        assert result["type"] == "failed"
+        assert result["error"] == "Failed to parse JSON from LLM response"
+        # call_count is MAX_RETRIES + 1 (default 2)
         assert mock_call_llm.call_count == main.MAX_RETRIES + 1
-        mock_insert_failed.assert_called_once_with(self.mock_cur, self.entry, "Failed to parse JSON from LLM response", "I am not JSON")
-        mock_mark_read.assert_called_once_with(123)
 
     @patch("main.call_llm")
-    @patch("main.mark_entry_read")
-    def test_process_entry_llm_unreachable(self, mock_mark_read, mock_call_llm):
-        """Test article processing when LLM server is unreachable."""
-        mock_call_llm.side_effect = requests.RequestException("Timeout")
+    def test_process_article_task_unreachable(self, mock_call_llm):
+        """Test task when LLM is unreachable."""
+        mock_call_llm.side_effect = requests.RequestException("Connection error")
 
-        with pytest.raises(main.LLMUnavailableError):
-            main.process_entry(self.mock_cur, self.entry, self.processed_ids)
+        result = main.process_article_task(self.entry)
 
-        mock_mark_read.assert_not_called()
-
-    @patch("main.call_llm")
-    def test_process_entry_already_processed(self, mock_call_llm):
-        """Test that already processed articles are skipped."""
-        self.processed_ids.add(123)
-
-        main.process_entry(self.mock_cur, self.entry, self.processed_ids)
-
-        mock_call_llm.assert_not_called()
+        assert result["type"] == "critical"
+        assert "LLM unreachable" in result["error"]
 
 class TestPurgeOldRecords:
     """Tests for the database purge logic."""
@@ -214,7 +182,7 @@ class TestHealthServer:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["llm_url"] == main.LLM_URL
+        assert data["llm_urls"] == main.LLM_URLS
         assert data["db_url"] == "postgresql://test:***@localhost/test"
 
     def test_non_healthz_endpoint(self):

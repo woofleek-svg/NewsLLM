@@ -13,6 +13,8 @@ import time
 import threading
 import typing
 import urllib.parse
+import itertools
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -33,7 +35,21 @@ log = logging.getLogger("news-processor")
 
 MINIFLUX_URL = os.environ["MINIFLUX_URL"]
 MINIFLUX_API_KEY = os.environ["MINIFLUX_API_KEY"]
-LLM_URL = os.environ.get("LLM_URL") or os.environ.get("LLAMA_CPP_URL") or "http://10.0.0.5:8000/v1/chat/completions"
+
+# Support multiple LLM endpoints for load balancing
+_raw_llm_urls = (os.environ.get("LLM_URLS") or 
+                 os.environ.get("LLM_URL") or 
+                 os.environ.get("LLAMA_CPP_URL") or 
+                 "http://10.0.0.5:8000/v1/chat/completions")
+LLM_URLS = [u.strip() for u in _raw_llm_urls.split(",") if u.strip()]
+LLM_URL_CYCLE = itertools.cycle(LLM_URLS)
+LLM_URL_LOCK = threading.Lock()
+
+def get_next_llm_url() -> str:
+    """Thread-safe selection of the next LLM endpoint."""
+    with LLM_URL_LOCK:
+        return next(LLM_URL_CYCLE)
+
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | litellm | ollama | vllm | generic
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
@@ -41,6 +57,7 @@ OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "1"))
+MAX_WORKERS = int(os.environ.get("MAX_WORKERS", "3"))
 PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
 SYSTEM_PROMPT_FILE = os.environ.get("SYSTEM_PROMPT_FILE", "")
 PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "1")
@@ -111,7 +128,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 
             resp = {
                 "status": "ok",
-                "llm_url": LLM_URL,
+                "llm_urls": LLM_URLS,
                 "db_url": masked_db_url,
             }
             self.wfile.write(json.dumps(resp).encode('utf-8'))
@@ -209,7 +226,8 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     if LLM_API_KEY:
         headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
-    resp = requests.post(LLM_URL, json=payload, headers=headers, timeout=300)
+    llm_url = get_next_llm_url()
+    resp = requests.post(llm_url, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
     raw_text = resp.json()["choices"][0]["message"]["content"]
@@ -413,23 +431,13 @@ def purge_old_records(cur: psycopg2.extensions.cursor) -> int:
 # ---------------------------------------------------------------------------
 
 
-class LLMUnavailableError(Exception):
-    """Raised when the LLM server is unreachable or times out."""
+def process_article_task(entry: dict) -> dict:
+    """Worker task to process a single article through the LLM.
 
-
-def process_entry(cur: psycopg2.extensions.cursor, entry: dict, processed_ids: set[int]) -> None:
-    """Process a single Miniflux entry through the LLM pipeline.
-
-    Raises LLMUnavailableError if the LLM server can't be reached,
-    signaling the caller to abort the rest of the cycle.
+    Returns a result dictionary to be handled by the main thread.
     """
     miniflux_id = entry["id"]
     title = entry.get("title", "(no title)")
-
-    if miniflux_id in processed_ids:
-        log.debug("Skipping already-processed article %d: %s", miniflux_id, title)
-        return
-
     content = entry.get("content", "")
     category = entry.get("feed", {}).get("category", {}).get("title", "uncategorized")
     feed_name = entry.get("feed", {}).get("title", "unknown")
@@ -443,8 +451,7 @@ def process_entry(cur: psycopg2.extensions.cursor, entry: dict, processed_ids: s
             llm_output, raw_text = call_llm(category, title, feed_name, content)
             processing_ms = int((time.monotonic() - start) * 1000)
         except requests.RequestException as exc:
-            log.error("LLM unreachable for article %d: %s — aborting cycle", miniflux_id, exc)
-            raise LLMUnavailableError(str(exc))
+            return {"entry": entry, "error": f"LLM unreachable: {exc}", "type": "critical"}
 
         if llm_output is None:
             last_error = "Failed to parse JSON from LLM response"
@@ -457,20 +464,24 @@ def process_entry(cur: psycopg2.extensions.cursor, entry: dict, processed_ids: s
             log.warning("Attempt %d — validation failed for %d: %s", attempt + 1, miniflux_id, error)
             continue
 
-        insert_processed_article(cur, entry, llm_output, raw_text, processing_ms)
-        log.info("Processing with prompt version %s", PROMPT_VERSION)
-        log.info("Processed article %d: %s (urgency=%d, %dms)", miniflux_id, title, llm_output["urgency_score"], processing_ms)
-        mark_entry_read(miniflux_id)
-        return
+        return {
+            "type": "success",
+            "entry": entry,
+            "llm_output": llm_output,
+            "raw_text": raw_text,
+            "processing_ms": processing_ms
+        }
 
-    # All retries exhausted (malformed output, not connectivity)
-    insert_failed_article(cur, entry, last_error or "Unknown error", raw_text)
-    log.warning("Article %d written to failed_articles: %s", miniflux_id, last_error)
-    mark_entry_read(miniflux_id)
+    return {
+        "type": "failed",
+        "entry": entry,
+        "error": last_error or "Unknown error",
+        "raw_text": raw_text
+    }
 
 
 def run_cycle() -> None:
-    """Run one processing cycle: fetch, process, purge."""
+    """Run one processing cycle: fetch, parallel process, serial write, purge."""
     try:
         entries = fetch_unread_entries()
     except requests.RequestException as exc:
@@ -492,38 +503,78 @@ def run_cycle() -> None:
 
     try:
         with conn.cursor() as cur:
-            # Batch check already processed articles
+            # Filter already processed
             processed_ids = get_already_processed_ids(cur, [e["id"] for e in entries])
+            to_process = [e for e in entries if e["id"] not in processed_ids]
 
-            for entry in entries:
-                try:
-                    process_entry(cur, entry, processed_ids)
-                    conn.commit()
-                except LLMUnavailableError:
-                    conn.rollback()
-                    log.warning("LLM server down — skipping remaining %d entries, will retry next cycle", len(entries))
-                    break
-                except Exception:
-                    conn.rollback()
-                    log.exception("Unexpected error processing entry %s", entry.get("id"))
+            if not to_process:
+                log.info("All fetched entries were already processed")
+            else:
+                log.info("Processing %d new articles using %d workers", len(to_process), MAX_WORKERS)
+                
+                results = []
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    future_to_entry = {executor.submit(process_article_task, entry): entry for entry in to_process}
+                    for future in as_completed(future_to_entry):
+                        try:
+                            results.append(future.result())
+                        except Exception as exc:
+                            entry = future_to_entry[future]
+                            log.error("Unhandled exception in worker for article %d: %s", entry["id"], exc)
+
+                # Serial database writes and Miniflux marking
+                for res in results:
+                    entry = res["entry"]
+                    res_type = res["type"]
+
+                    if res_type == "success":
+                        try:
+                            insert_processed_article(cur, entry, res["llm_output"], res["raw_text"], res["processing_ms"])
+                            conn.commit()
+                            mark_entry_read(entry["id"])
+                            log.info("Processed article %d: %s (urgency=%d, %dms)", 
+                                     entry["id"], entry.get("title"), res["llm_output"]["urgency_score"], res["processing_ms"])
+                        except Exception as exc:
+                            conn.rollback()
+                            log.error("Failed to write success result for article %d: %s", entry["id"], exc)
+
+                    elif res_type == "failed":
+                        try:
+                            insert_failed_article(cur, entry, res["error"], res.get("raw_text"))
+                            conn.commit()
+                            mark_entry_read(entry["id"])
+                            log.warning("Article %d written to failed_articles: %s", entry["id"], res["error"])
+                        except Exception as exc:
+                            conn.rollback()
+                            log.error("Failed to write failure result for article %d: %s", entry["id"], exc)
+
+                    elif res_type == "critical":
+                        log.error("Critical worker failure for article %d: %s — will retry next cycle", entry["id"], res["error"])
+                        # We don't mark as read, so it will be retried
 
             # Purge old records at end of cycle
-            purged = purge_old_records(cur)
-            conn.commit()
-            if purged:
-                log.info("Purged %d records older than %d hours", purged, PURGE_INTERVAL_HOURS)
+            try:
+                purged = purge_old_records(cur)
+                conn.commit()
+                if purged:
+                    log.info("Purged %d records older than %d hours", purged, PURGE_INTERVAL_HOURS)
+            except Exception as exc:
+                conn.rollback()
+                log.error("Purge failed: %s", exc)
+
     finally:
         conn.close()
 
 
 def main() -> None:
     """Run the news processor service."""
-    if not LLM_URL:
-        log.critical("LLM_URL (or LLAMA_CPP_URL) environment variable is not set — cannot start")
+    if not LLM_URLS:
+        log.critical("No LLM endpoints configured (set LLM_URLS or LLM_URL) — cannot start")
         sys.exit(1)
 
     start_health_server()
-    log.info("News processor starting (poll_interval=%ds, model=%s, backend=%s)", POLL_INTERVAL, LLM_MODEL, LLM_BACKEND)
+    log.info("News processor starting (poll_interval=%ds, model=%s, workers=%d, backends=%d)", 
+             POLL_INTERVAL, LLM_MODEL, MAX_WORKERS, len(LLM_URLS))
 
     while True:
         run_cycle()
