@@ -12,8 +12,11 @@ import smtplib
 import ssl
 import urllib.parse
 from contextlib import contextmanager
+import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 import psycopg2
 import psycopg2.extras
@@ -27,6 +30,7 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 EMAIL_RECIPIENTS = [e.strip() for e in os.environ.get("EMAIL_RECIPIENTS", "").split(",") if e.strip()]
+HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9091"))
 
 mcp = FastMCP(
     "NewsLLM",
@@ -733,5 +737,48 @@ def send_email(subject: str, body: str, recipients: list[str] | None = None) -> 
     return _send_smtp(subject, html_body, body, to_addrs)
 
 
+# ---------------------------------------------------------------------------
+# Health Server
+# ---------------------------------------------------------------------------
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in a separate thread."""
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/healthz':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+
+            db_connected = False
+            try:
+                with get_db() as cur:
+                    cur.execute("SELECT 1")
+                    db_connected = True
+            except Exception:
+                db_connected = False
+
+            resp = {
+                "status": "ok",
+                "db_connected": db_connected,
+            }
+            self.wfile.write(json.dumps(resp).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Suppress access logs for health checks
+        pass
+
+def start_health_server():
+    server = ThreadedHTTPServer(('0.0.0.0', HEALTH_PORT), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log.info("Started health server on port %d", HEALTH_PORT)
+
+
 if __name__ == "__main__":
+    start_health_server()
     mcp.run(transport="streamable-http")

@@ -79,6 +79,8 @@ services:
       MAX_CONTENT_LENGTH: ${MAX_CONTENT_LENGTH}
       MAX_RETRIES: ${MAX_RETRIES}
       PURGE_INTERVAL_HOURS: ${PURGE_INTERVAL_HOURS:-48}
+      SYSTEM_PROMPT_FILE: ${SYSTEM_PROMPT_FILE:-}
+      PROMPT_VERSION: ${PROMPT_VERSION:-1}
     networks:
       - processing
     healthcheck:

@@ -10,7 +10,10 @@ import os
 import re
 import sys
 import time
+import threading
 import urllib.parse
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 import psycopg2
 import psycopg2.extras
@@ -38,6 +41,9 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
 MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "1"))
 PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
+SYSTEM_PROMPT_FILE = os.environ.get("SYSTEM_PROMPT_FILE", "")
+PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "1")
+HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9090"))
 
 if PURGE_INTERVAL_HOURS <= 0:
     raise ValueError("PURGE_INTERVAL_HOURS must be a positive integer.")
@@ -70,6 +76,56 @@ If in doubt between two levels, choose the LOWER one. \
 Alert fatigue is worse than a missed notification.
 
 Respond with ONLY the JSON object."""
+
+if SYSTEM_PROMPT_FILE:
+    try:
+        with open(SYSTEM_PROMPT_FILE) as f:
+            SYSTEM_PROMPT = f.read().strip()
+        log.info('Loaded system prompt from %s', SYSTEM_PROMPT_FILE)
+    except (FileNotFoundError, PermissionError) as exc:
+        log.error('Failed to load prompt file %s: %s — using default', SYSTEM_PROMPT_FILE, exc)
+
+# ---------------------------------------------------------------------------
+# Health Server
+# ---------------------------------------------------------------------------
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in a separate thread."""
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/healthz':
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+
+            masked_db_url = OUTPUT_DB_URL
+            try:
+                parsed = urllib.parse.urlparse(OUTPUT_DB_URL)
+                if parsed.password:
+                    masked_db_url = OUTPUT_DB_URL.replace(":" + parsed.password + "@", ":***@")
+            except Exception:
+                masked_db_url = "***"
+
+            resp = {
+                "status": "ok",
+                "llm_url": LLM_URL,
+                "db_url": masked_db_url,
+            }
+            self.wfile.write(json.dumps(resp).encode('utf-8'))
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Suppress access logs for health checks
+        pass
+
+def start_health_server():
+    server = ThreadedHTTPServer(('0.0.0.0', HEALTH_PORT), HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    log.info("Started health server on port %d", HEALTH_PORT)
 
 # ---------------------------------------------------------------------------
 # Miniflux client
@@ -390,6 +446,7 @@ def process_entry(cur, entry: dict, processed_ids: set[int]) -> None:
             continue
 
         insert_processed_article(cur, entry, llm_output, raw_text, processing_ms)
+        log.info("Processing with prompt version %s", PROMPT_VERSION)
         log.info("Processed article %d: %s (urgency=%d, %dms)", miniflux_id, title, llm_output["urgency_score"], processing_ms)
         mark_entry_read(miniflux_id)
         return
@@ -452,6 +509,7 @@ def main() -> None:
         log.critical("LLM_URL (or LLAMA_CPP_URL) environment variable is not set — cannot start")
         sys.exit(1)
 
+    start_health_server()
     log.info("News processor starting (poll_interval=%ds, model=%s, backend=%s)", POLL_INTERVAL, LLM_MODEL, LLM_BACKEND)
 
     while True:
