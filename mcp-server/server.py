@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import smtplib
+import ssl
 import urllib.parse
 from contextlib import contextmanager
 from email.mime.multipart import MIMEMultipart
@@ -576,9 +577,11 @@ def _build_plain_text(articles: list[dict], intro: str = "") -> str:
 def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict:
     """Send an email via Gmail SMTP. Returns status dict."""
     if not SMTP_USER or not SMTP_PASSWORD:
-        return {"error": "SMTP credentials not configured"}
+        log.error('SMTP credentials not configured')
+        return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
     if not to_addrs:
-        return {"error": "No recipients configured or provided"}
+        log.error('No recipients configured')
+        return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
 
     msg = MIMEMultipart("alternative")
     msg["From"] = f"NewsLLM <{SMTP_USER}>"
@@ -588,8 +591,8 @@ def _send_smtp(subject: str, html: str, plain: str, to_addrs: list[str]) -> dict
     msg.attach(MIMEText(html, "html"))
 
     try:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-            server.starttls()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=30) as server:
+            server.starttls(context=ssl.create_default_context())
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, to_addrs, msg.as_string())
         log.info("Email sent to %s: %s", to_addrs, subject)
@@ -653,6 +656,15 @@ def email_briefing(
 
     Returns send status with recipient list.
     """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.error('SMTP credentials not configured')
+        return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
+
+    to_addrs = recipients if recipients else EMAIL_RECIPIENTS
+    if not to_addrs:
+        log.error('No recipients configured')
+        return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
+
     hours = min(max(hours, 1), 48)
     limit = min(max(limit, 1), 50)
 
@@ -680,7 +692,6 @@ def email_briefing(
 
     html = _build_briefing_html(articles, intro, theme_name=theme)
     plain = _build_plain_text(articles, intro)
-    to_addrs = recipients if recipients else EMAIL_RECIPIENTS
 
     return _send_smtp(subject, html, plain, to_addrs)
 
@@ -702,7 +713,14 @@ def send_email(subject: str, body: str, recipients: list[str] | None = None) -> 
         body: Plain text email body. Keep it brief.
         recipients: Optional override list. Omit to use defaults.
     """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.error('SMTP credentials not configured')
+        return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
+
     to_addrs = recipients if recipients else EMAIL_RECIPIENTS
+    if not to_addrs:
+        log.error('No recipients configured')
+        return {'success': False, 'error': 'Set EMAIL_RECIPIENTS environment variable.'}
 
     html_body = f"""\
 <html><body style="font-family: -apple-system, Arial, sans-serif; max-width: 680px; margin: 0 auto;">
