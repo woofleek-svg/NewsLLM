@@ -10,9 +10,10 @@ import logging
 import os
 import smtplib
 import ssl
+import threading
+import time
 import urllib.parse
 from contextlib import contextmanager
-import threading
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -31,6 +32,52 @@ SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 EMAIL_RECIPIENTS = [e.strip() for e in os.environ.get("EMAIL_RECIPIENTS", "").split(",") if e.strip()]
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9091"))
+
+
+class EmailRateLimiter:
+    """Token bucket rate limiter for email sending.
+
+    Limits to max_emails_per_minute across all email functions (send_email, email_briefing).
+    Default: 10 emails/minute (configurable via EMAIL_RATE_LIMIT env var).
+    """
+
+    def __init__(self, max_emails_per_minute: int = 10, max_burst: int = 15):
+        self.max_emails = max_emails_per_minute
+        self.max_burst = max_burst
+        self.tokens = float(max_burst)
+        self.last_refill = time.monotonic()
+        self.lock = threading.Lock()
+
+    def _refill(self):
+        now = time.monotonic()
+        elapsed = now - self.last_refill
+        refill_rate = self.max_emails / 60.0  # tokens per second
+        self.tokens = min(self.max_burst, self.tokens + elapsed * refill_rate)
+        self.last_refill = now
+
+    def acquire(self) -> bool:
+        """Acquire a token. Returns False if rate limited."""
+        with self.lock:
+            self._refill()
+            if self.tokens >= 1.0:
+                self.tokens -= 1.0
+                return True
+            return False
+
+    def wait_time(self) -> float:
+        """Seconds until next token is available."""
+        with self.lock:
+            self._refill()
+            if self.tokens >= 1.0:
+                return 0.0
+            deficit = 1.0 - self.tokens
+            refill_rate = self.max_emails / 60.0
+            return deficit / refill_rate
+
+
+# Global rate limiter instance — shared by all email-sending tools
+_email_rate_limit = int(os.environ.get("EMAIL_RATE_LIMIT", "10"))
+_email_limiter = EmailRateLimiter(max_emails_per_minute=_email_rate_limit, max_burst=_email_rate_limit + 5)
 
 mcp = FastMCP(
     "NewsLLM",
@@ -55,6 +102,34 @@ def get_db():
             yield cur
     finally:
         conn.close()
+
+
+def _check_email_rate_limit() -> dict | None:
+    """Check if email rate limit is exceeded. Returns error dict or None."""
+    if not _email_limiter.acquire():
+        wait = _email_limiter.wait_time()
+        log.warning("Email rate limit exceeded — try again in %.1fs", wait)
+        return {
+            "success": False,
+            "error": f"Rate limited — maximum {_email_rate_limit} emails/minute. Try again in {wait:.1f}s.",
+        }
+    return None
+
+
+def _check_email_config() -> dict | None:
+    """Validate SMTP credentials and recipients. Returns error dict or None."""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        log.error("SMTP credentials not configured")
+        return {"success": False, "error": "Set SMTP_USER and SMTP_PASSWORD environment variables."}
+    return None
+
+
+def _check_recipients(to_addrs: list[str] | None) -> dict | None:
+    """Validate that recipients list is non-empty. Returns error dict or None."""
+    if not to_addrs:
+        log.error("No recipients configured")
+        return {"success": False, "error": "Set EMAIL_RECIPIENTS environment variable."}
+    return None
 
 
 def _format_article_summary(row: dict) -> dict:
@@ -660,6 +735,11 @@ def email_briefing(
 
     Returns send status with recipient list.
     """
+    # Rate limit check first
+    rate_limit_err = _check_email_rate_limit()
+    if rate_limit_err:
+        return rate_limit_err
+
     if not SMTP_USER or not SMTP_PASSWORD:
         log.error('SMTP credentials not configured')
         return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
@@ -717,6 +797,11 @@ def send_email(subject: str, body: str, recipients: list[str] | None = None) -> 
         body: Plain text email body. Keep it brief.
         recipients: Optional override list. Omit to use defaults.
     """
+    # Rate limit check first
+    rate_limit_err = _check_email_rate_limit()
+    if rate_limit_err:
+        return rate_limit_err
+
     if not SMTP_USER or not SMTP_PASSWORD:
         log.error('SMTP credentials not configured')
         return {'success': False, 'error': 'Set SMTP_USER and SMTP_PASSWORD environment variables.'}
