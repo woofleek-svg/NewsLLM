@@ -213,13 +213,13 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     # Backend-specific options
     if LLM_BACKEND == "litellm":
         payload["max_tokens"] = 1024
-        payload["response_format"] = {"type": "json_object"}
+        # response_format not supported by tencent/hy3-preview model
     elif LLM_BACKEND == "llama.cpp":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
-        payload["response_format"] = {"type": "json_object"}
+        # response_format not supported by tencent/hy3-preview model
     elif LLM_BACKEND == "vllm":
         payload["max_tokens"] = 1024
-        payload["response_format"] = {"type": "json_object"}
+        # response_format not supported by tencent/hy3-preview model
     elif LLM_BACKEND == "ollama":
         payload["options"] = {"num_predict": 1024}
         payload["format"] = "json"
@@ -232,10 +232,14 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     resp = requests.post(llm_url, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
-    raw_text = resp.json()["choices"][0]["message"]["content"]
+    msg = resp.json()["choices"][0]["message"]
+    raw_text = msg.get("content") or msg.get("reasoning_content", "")
 
-    # Strip thinking tags if the model still emits them
-    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+    # Strip thinking/reasoning blocks the model may still emit
+    cleaned = re.sub(r'<thinking[^>]*>.*?</thinking>', '', raw_text, flags=re.DOTALL)
+    cleaned = re.sub(r'<reasoning[^>]*>.*?</reasoning>', '', cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r'<\|reserved_[0-9]+\|>', '', cleaned)
+    cleaned = cleaned.strip()
 
     # Extract JSON from potential surrounding text or markdown fences
     json_match = re.search(r"({.*})", cleaned, re.DOTALL)
