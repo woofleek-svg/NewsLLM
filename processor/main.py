@@ -211,15 +211,20 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     }
 
     # Backend-specific options
+    supports_response_format = "tencent/hy3-preview" not in (LLM_MODEL or "").lower()
+
     if LLM_BACKEND == "litellm":
         payload["max_tokens"] = 1024
-        payload["response_format"] = {"type": "json_object"}
+        if supports_response_format:
+            payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "llama.cpp":
         payload["chat_template_kwargs"] = {"enable_thinking": False}
-        payload["response_format"] = {"type": "json_object"}
+        if supports_response_format:
+            payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "vllm":
         payload["max_tokens"] = 1024
-        payload["response_format"] = {"type": "json_object"}
+        if supports_response_format:
+            payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "ollama":
         payload["options"] = {"num_predict": 1024}
         payload["format"] = "json"
@@ -232,10 +237,22 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     resp = requests.post(llm_url, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
 
-    raw_text = resp.json()["choices"][0]["message"]["content"]
+    try:
+        msg = resp.json().get("choices", [{}])[0].get("message", {})
+        raw_text = msg.get("content") or msg.get("reasoning_content", "")
+    except (ValueError, KeyError, IndexError):
+        return None, resp.text
 
-    # Strip thinking tags if the model still emits them
-    cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL).strip()
+    # Strip thinking/reasoning/reserved blocks from a working copy
+    cleaned = raw_text
+    for pattern in [
+        r'<thinking[^>]*>.*?</thinking>',
+        r'<reasoning[^>]*>.*?</reasoning>',
+        r'<think>.*?</think>',
+        r'<\|reserved_[0-9]+\|>',
+    ]:
+        cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL)
+    cleaned = cleaned.strip()
 
     # Extract JSON from potential surrounding text or markdown fences
     json_match = re.search(r"({.*})", cleaned, re.DOTALL)
