@@ -197,3 +197,34 @@ class TestImageExtraction:
     def test_extract_image_url_none(self):
         entry = {"content": "<p>No images</p>"}
         assert main.extract_image_url(entry) is None
+
+class TestMarkEntryRead:
+    @patch("main._miniflux_session.put")
+    @patch("main.log.warning")
+    def test_mark_entry_read_error(self, mock_warning, mock_put):
+        error = requests.RequestException("Connection timeout")
+        mock_put.side_effect = error
+
+        main.mark_entry_read(42)
+
+        mock_put.assert_called_once_with(
+            f"{main.MINIFLUX_URL}/entries",
+            json={"entry_ids": [42], "status": "read"},
+            timeout=15,
+        )
+        mock_warning.assert_called_once_with("Failed to mark entry %d as read: %s", 42, error)
+
+
+    @patch("main._miniflux_session.put")
+    def test_mark_entry_read_success(self, mock_put):
+        mock_resp = MagicMock()
+        mock_put.return_value = mock_resp
+
+        main.mark_entry_read(42)
+
+        mock_put.assert_called_once_with(
+            f"{main.MINIFLUX_URL}/entries",
+            json={"entry_ids": [42], "status": "read"},
+            timeout=15,
+        )
+        mock_resp.raise_for_status.assert_called_once()
