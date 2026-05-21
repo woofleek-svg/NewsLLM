@@ -56,13 +56,17 @@ LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | litellm | ollama | vllm | generic
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
 LLM_DISABLE_THINKING = os.environ.get("LLM_DISABLE_THINKING", "true").lower() == "true"
-LLM_EXTRA_PARAMS_JSON = os.environ.get("LLM_EXTRA_PARAMS", "")
+LLM_EXTRA_PARAMS_JSON = os.environ.get("LLM_EXTRA_PARAMS", "{}")
 LLM_EXTRA_PARAMS = {}
 if LLM_EXTRA_PARAMS_JSON:
     try:
         LLM_EXTRA_PARAMS = json.loads(LLM_EXTRA_PARAMS_JSON)
-    except Exception as exc:
-        log.error("Failed to parse LLM_EXTRA_PARAMS JSON: %s", exc)
+        if not isinstance(LLM_EXTRA_PARAMS, dict):
+            log.warning("LLM_EXTRA_PARAMS must be a JSON object, falling back to empty dict")
+            LLM_EXTRA_PARAMS = {}
+    except json.JSONDecodeError as exc:
+        log.warning("Invalid JSON in LLM_EXTRA_PARAMS: %s, falling back to empty dict", exc)
+        LLM_EXTRA_PARAMS = {}
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
@@ -227,6 +231,10 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         ],
         "temperature": 0.1,
     }
+
+    # Merge LLM_EXTRA_PARAMS
+    if LLM_EXTRA_PARAMS:
+        payload.update(LLM_EXTRA_PARAMS)
 
     # Backend-specific options
     supports_response_format = "tencent/hy3-preview" not in (LLM_MODEL or "").lower()
