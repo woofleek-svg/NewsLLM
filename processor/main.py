@@ -16,6 +16,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 import psycopg2
+
+from shared.urls import is_safe_url, parse_safe_url
 import psycopg2.extras
 import requests
 
@@ -244,9 +246,10 @@ def validate_llm_output(data: dict) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def _optimize_image_url(url: str) -> str:
+def _optimize_image_url(url: str, parsed: urllib.parse.ParseResult | None = None) -> str:
     """Rewrite image URLs to request a smaller version where the CDN supports it."""
-    parsed = urllib.parse.urlparse(url)
+    if parsed is None:
+        parsed = urllib.parse.urlparse(url)
     if not parsed.hostname:
         return url
 
@@ -290,23 +293,17 @@ def extract_image_url(entry: dict) -> str | None:
         mime = enc.get("mime_type", "")
         url = enc.get("url", "")
         if mime.startswith("image/") and url:
-            try:
-                parsed = urllib.parse.urlparse(url)
-                if parsed.scheme in ("http", "https"):
-                    return _optimize_image_url(url)
-            except ValueError:
-                pass
+            parsed = parse_safe_url(url)
+            if parsed:
+                return _optimize_image_url(url, parsed)
 
     # Fall back to first valid img tag in content
     content = entry.get("content", "")
     for match in re.finditer(r'<img[^>]+src=["\']([^"\']+)', content):
         url = match.group(1)
-        try:
-            parsed = urllib.parse.urlparse(url)
-            if parsed.scheme in ("http", "https"):
-                return _optimize_image_url(url)
-        except ValueError:
-            continue
+        parsed = parse_safe_url(url)
+        if parsed:
+            return _optimize_image_url(url, parsed)
 
     return None
 
@@ -336,14 +333,7 @@ def insert_processed_article(cur, entry: dict, llm_output: dict, raw_text: str, 
     """Insert a successfully processed article."""
     image_url = extract_image_url(entry)
     original_url = entry.get("url")
-    if original_url:
-        try:
-            parsed_url = urllib.parse.urlparse(original_url)
-            if parsed_url.scheme not in ("http", "https"):
-                original_url = "#"
-        except ValueError:
-            original_url = "#"
-    else:
+    if not original_url or not is_safe_url(original_url):
         original_url = "#"
 
     cur.execute(
