@@ -189,3 +189,106 @@ class TestHealthServer:
         """Verify that unknown endpoints return 404."""
         resp = requests.get(f"http://localhost:{main.HEALTH_PORT}/other")
         assert resp.status_code == 404
+class TestEndToEndCycle:
+    """End-to-end tests verifying LLM output parsing and DB writes."""
+
+    @patch("main.fetch_unread_entries")
+    @patch("main.get_db_connection")
+    @patch("main.mark_entry_read")
+    @patch("requests.post")
+    def test_run_cycle_with_thinking_tags(self, mock_post, mock_mark_read, mock_get_db, mock_fetch):
+        # Setup mocks
+        entries = [{"id": 101, "title": "Article 1", "published_at": "2023-10-10T00:00:00Z"}]
+        mock_fetch.return_value = entries
+
+        mock_conn = MagicMock()
+        mock_get_db.return_value = mock_conn
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        # mock_cur.fetchall should return empty for get_already_processed_ids
+        mock_cur.fetchall.return_value = []
+
+        # Mock requests.post for LLM
+        mock_resp = MagicMock()
+        valid_json = {
+            "summary": "This is a summary.",
+            "tags": ["test"],
+            "entities": [],
+            "urgency_score": 1
+        }
+
+        raw_llm_content = "<think>some reasoning</think>\n" + json.dumps(valid_json)
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": raw_llm_content}}]
+        }
+        mock_resp.text = raw_llm_content
+        mock_post.return_value = mock_resp
+
+        # Run cycle
+        main.run_cycle()
+
+        # Verify DB insert
+        insert_calls = [
+            call for call in mock_cur.execute.call_args_list
+            if "INSERT INTO processed_articles" in call[0][0]
+        ]
+        assert len(insert_calls) == 1
+
+        insert_params = insert_calls[0][0][1]
+
+        # The 8th parameter is summary (index 7), 14th is raw_llm_output (index 13)
+        assert insert_params[7] == "This is a summary."
+
+        # The raw output should be stored unmodified
+        raw_llm_output_json = json.loads(insert_params[13])
+        assert raw_llm_output_json["raw"] == raw_llm_content
+
+    @patch("main.fetch_unread_entries")
+    @patch("main.get_db_connection")
+    @patch("main.mark_entry_read")
+    @patch("requests.post")
+    def test_run_cycle_without_thinking_tags(self, mock_post, mock_mark_read, mock_get_db, mock_fetch):
+        # Setup mocks
+        entries = [{"id": 102, "title": "Article 2", "published_at": "2023-10-10T00:00:00Z"}]
+        mock_fetch.return_value = entries
+
+        mock_conn = MagicMock()
+        mock_get_db.return_value = mock_conn
+        mock_cur = MagicMock()
+        mock_conn.cursor.return_value.__enter__.return_value = mock_cur
+
+        mock_cur.fetchall.return_value = []
+
+        # Mock requests.post for LLM
+        mock_resp = MagicMock()
+        valid_json = {
+            "summary": "This is another summary.",
+            "tags": ["test"],
+            "entities": [],
+            "urgency_score": 2
+        }
+
+        raw_llm_content = json.dumps(valid_json)
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": raw_llm_content}}]
+        }
+        mock_resp.text = raw_llm_content
+        mock_post.return_value = mock_resp
+
+        # Run cycle
+        main.run_cycle()
+
+        # Verify DB insert
+        insert_calls = [
+            call for call in mock_cur.execute.call_args_list
+            if "INSERT INTO processed_articles" in call[0][0]
+        ]
+        assert len(insert_calls) == 1
+
+        insert_params = insert_calls[0][0][1]
+
+        assert insert_params[7] == "This is another summary."
+
+        raw_llm_output_json = json.loads(insert_params[13])
+        assert raw_llm_output_json["raw"] == raw_llm_content
