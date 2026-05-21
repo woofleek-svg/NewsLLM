@@ -143,13 +143,13 @@ class TestCallLLM:
         payload = mock_post.call_args[1]["json"]
         assert payload["chat_template_kwargs"]["enable_thinking"] is False
 
-        # ollama
+        # ollama — "think" is not a standard Ollama API parameter, should not be present
         mock_post.reset_mock()
         main.LLM_BACKEND = "ollama"
         main.call_llm("Tech", "Title", "Feed", "Content")
         payload = mock_post.call_args[1]["json"]
-        assert payload["think"] is False
-        assert payload["options"]["think"] is False
+        assert "think" not in payload
+        assert "think" not in payload.get("options", {})
 
     @patch("main.requests.post")
     def test_call_llm_disable_thinking_false(self, mock_post):
