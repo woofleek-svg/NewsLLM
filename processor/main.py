@@ -77,6 +77,17 @@ SYSTEM_PROMPT_FILE = os.environ.get("SYSTEM_PROMPT_FILE", "")
 PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "1")
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9090"))
 
+_llm_extra_params_str = os.environ.get("LLM_EXTRA_PARAMS", "{}")
+try:
+    LLM_EXTRA_PARAMS = json.loads(_llm_extra_params_str)
+    if not isinstance(LLM_EXTRA_PARAMS, dict):
+        log.warning("LLM_EXTRA_PARAMS must be a JSON object, falling back to empty dict")
+        LLM_EXTRA_PARAMS = {}
+except json.JSONDecodeError as e:
+    log.warning("Invalid JSON in LLM_EXTRA_PARAMS: %s, falling back to empty dict", e)
+    LLM_EXTRA_PARAMS = {}
+
+
 if PURGE_INTERVAL_HOURS <= 0:
     raise ValueError("PURGE_INTERVAL_HOURS must be a positive integer.")
 
@@ -232,9 +243,7 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         "temperature": 0.1,
     }
 
-    # Merge LLM_EXTRA_PARAMS
-    if LLM_EXTRA_PARAMS:
-        payload.update(LLM_EXTRA_PARAMS)
+
 
     # Backend-specific options
     supports_response_format = "tencent/hy3-preview" not in (LLM_MODEL or "").lower()

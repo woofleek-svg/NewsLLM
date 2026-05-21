@@ -15,6 +15,42 @@ os.environ["LLM_URL"] = "http://llm"
 
 import main
 import requests
+import importlib
+
+class TestEnvParsing:
+    @patch("main.log.warning")
+    def test_invalid_json_extra_params(self, mock_warning):
+        import unittest
+        os.environ["LLM_EXTRA_PARAMS"] = "{invalid json"
+
+        # Reload main to trigger top-level execution
+        importlib.reload(main)
+
+        assert main.LLM_EXTRA_PARAMS == {}
+        mock_warning.assert_called_with(
+            "Invalid JSON in LLM_EXTRA_PARAMS: %s, falling back to empty dict",
+            unittest.mock.ANY
+        )
+
+        # Cleanup
+        del os.environ["LLM_EXTRA_PARAMS"]
+        importlib.reload(main)
+
+    @patch("main.log.warning")
+    def test_non_dict_extra_params(self, mock_warning):
+        os.environ["LLM_EXTRA_PARAMS"] = '["a", "b"]'
+
+        # Reload main to trigger top-level execution
+        importlib.reload(main)
+
+        assert main.LLM_EXTRA_PARAMS == {}
+        mock_warning.assert_called_with(
+            "LLM_EXTRA_PARAMS must be a JSON object, falling back to empty dict"
+        )
+
+        # Cleanup
+        del os.environ["LLM_EXTRA_PARAMS"]
+        importlib.reload(main)
 
 class TestCallLLM:
     @patch("main.requests.post")
@@ -212,6 +248,30 @@ class TestCallLLM:
         result_json, raw_text = main.call_llm("Tech", "Title", "Feed", "Content")
         assert result_json == valid_json
         assert raw_text == raw_output
+
+    @patch("main.requests.post")
+    def test_call_llm_with_extra_params(self, mock_post):
+        mock_response = MagicMock()
+        valid_json = {"summary": "test", "tags": ["a"], "entities": [], "urgency_score": 1}
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": json.dumps(valid_json)}}]
+        }
+        mock_post.return_value = mock_response
+
+        # Store original and set new
+        original_params = main.LLM_EXTRA_PARAMS
+        main.LLM_EXTRA_PARAMS = {"top_p": 0.9, "presence_penalty": 0.5}
+
+        try:
+            main.call_llm("Tech", "Title", "Feed", "Content")
+
+            mock_post.assert_called_once()
+            payload = mock_post.call_args[1]["json"]
+            assert payload["top_p"] == 0.9
+            assert payload["presence_penalty"] == 0.5
+            assert payload["temperature"] == 0.1 # Should remain unmodified
+        finally:
+            main.LLM_EXTRA_PARAMS = original_params
 
     @patch("main.requests.post")
     def test_call_llm_json_parse_error(self, mock_post):
