@@ -76,18 +76,6 @@ PURGE_INTERVAL_HOURS = int(os.environ.get("PURGE_INTERVAL_HOURS", "48"))
 SYSTEM_PROMPT_FILE = os.environ.get("SYSTEM_PROMPT_FILE", "")
 PROMPT_VERSION = os.environ.get("PROMPT_VERSION", "1")
 HEALTH_PORT = int(os.environ.get("HEALTH_PORT", "9090"))
-
-_llm_extra_params_str = os.environ.get("LLM_EXTRA_PARAMS", "{}")
-try:
-    LLM_EXTRA_PARAMS = json.loads(_llm_extra_params_str)
-    if not isinstance(LLM_EXTRA_PARAMS, dict):
-        log.warning("LLM_EXTRA_PARAMS must be a JSON object, falling back to empty dict")
-        LLM_EXTRA_PARAMS = {}
-except json.JSONDecodeError as e:
-    log.warning("Invalid JSON in LLM_EXTRA_PARAMS: %s, falling back to empty dict", e)
-    LLM_EXTRA_PARAMS = {}
-
-
 if PURGE_INTERVAL_HOURS <= 0:
     raise ValueError("PURGE_INTERVAL_HOURS must be a positive integer.")
 
@@ -242,9 +230,6 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         ],
         "temperature": 0.1,
     }
-
-
-
     # Backend-specific options
     supports_response_format = "tencent/hy3-preview" not in (LLM_MODEL or "").lower()
 
@@ -255,7 +240,7 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         if LLM_DISABLE_THINKING:
             # Only send thinking parameters if model name suggests it is a thinking/reasoning model
             # to avoid UnsupportedParamsError on other providers/models.
-            is_thinking_model = any(k in (LLM_MODEL or "").lower() for k in ["r1", "reasoning", "thinking", "deepseek"])
+            is_thinking_model = any(k in (LLM_MODEL or "").lower() for k in ["r1", "reasoning", "thinking"])
             if is_thinking_model:
                 payload["thinking"] = {"type": "disabled"}
     elif LLM_BACKEND == "llama.cpp":
@@ -272,9 +257,6 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
     elif LLM_BACKEND == "ollama":
         payload["options"] = {"num_predict": 1024}
         payload["format"] = "json"
-        if LLM_DISABLE_THINKING:
-            payload["think"] = False
-            payload["options"]["think"] = False
 
     # Merge custom parameters from LLM_EXTRA_PARAMS
     if LLM_EXTRA_PARAMS:
