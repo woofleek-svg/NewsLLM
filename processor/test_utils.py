@@ -13,7 +13,7 @@ os.environ["OUTPUT_DB_URL"] = "postgres://db"
 os.environ["LLM_URL"] = "http://llm"
 
 import main
-from main import _optimize_image_url, get_already_processed_ids, extract_image_url
+from main import _optimize_image_url, get_already_processed_ids, extract_image_url, insert_failed_article
 
 class TestOptimizeImageUrl(unittest.TestCase):
     def test_empty_url(self):
@@ -196,6 +196,51 @@ class TestExtractImageUrl(unittest.TestCase):
         # Result should be optimized
         self.assertIn("w=600", extract_image_url(entry))
 
+
+
+
+class TestInsertFailedArticle(unittest.TestCase):
+    def test_insert_failed_article_with_raw_text(self):
+        cur = MagicMock()
+        entry = {
+            "id": 123,
+            "title": "Test Article",
+            "url": "https://example.com/test",
+        }
+        error_msg = "Test Error"
+        raw_text = "Raw LLM output"
+
+        insert_failed_article(cur, entry, error_msg, raw_text)
+
+        cur.execute.assert_called_once()
+
+        call_args = cur.execute.call_args[0]
+        query = call_args[0]
+        params = call_args[1]
+
+        self.assertIn("INSERT INTO failed_articles", query)
+        self.assertIn("ON CONFLICT (miniflux_id) DO NOTHING", query)
+        self.assertEqual(params, (123, "Test Article", "https://example.com/test", "Test Error", "Raw LLM output"))
+
+    def test_insert_failed_article_without_raw_text(self):
+        cur = MagicMock()
+        entry = {
+            "id": 456,
+            # Missing title and url to test .get() defaults
+        }
+        error_msg = "Another Error"
+
+        insert_failed_article(cur, entry, error_msg)
+
+        cur.execute.assert_called_once()
+
+        call_args = cur.execute.call_args[0]
+        query = call_args[0]
+        params = call_args[1]
+
+        self.assertIn("INSERT INTO failed_articles", query)
+        self.assertIn("ON CONFLICT (miniflux_id) DO NOTHING", query)
+        self.assertEqual(params, (456, None, None, "Another Error", None))
 
 if __name__ == '__main__':
     unittest.main()
