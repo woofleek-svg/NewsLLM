@@ -69,6 +69,123 @@ class TestCallLLM:
         assert payload["options"]["num_predict"] == 1024
 
     @patch("main.requests.post")
+    def test_call_llm_disable_thinking_true(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary": "x"}'}}]
+        }
+        mock_post.return_value = mock_response
+
+        # Enable disable_thinking globally
+        main.LLM_DISABLE_THINKING = True
+
+        # litellm with deepseek-r1 (thinking model)
+        main.LLM_BACKEND = "litellm"
+        main.LLM_MODEL = "deepseek-r1:8b"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert payload["thinking"] == {"type": "disabled"}
+
+        # litellm with non-thinking model (should not add thinking parameter)
+        mock_post.reset_mock()
+        main.LLM_MODEL = "qwen3.5-35b"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert "thinking" not in payload
+
+        # llama.cpp
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "llama.cpp"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert payload["chat_template_kwargs"]["enable_thinking"] is False
+
+        # vllm
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "vllm"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert payload["chat_template_kwargs"]["enable_thinking"] is False
+
+        # ollama
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "ollama"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert payload["think"] is False
+        assert payload["options"]["think"] is False
+
+    @patch("main.requests.post")
+    def test_call_llm_disable_thinking_false(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary": "x"}'}}]
+        }
+        mock_post.return_value = mock_response
+
+        # Disable disable_thinking globally
+        main.LLM_DISABLE_THINKING = False
+
+        # litellm with deepseek-r1
+        main.LLM_BACKEND = "litellm"
+        main.LLM_MODEL = "deepseek-r1:8b"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert "thinking" not in payload
+
+        # llama.cpp
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "llama.cpp"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert "chat_template_kwargs" not in payload
+
+        # vllm
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "vllm"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert "chat_template_kwargs" not in payload
+
+        # ollama
+        mock_post.reset_mock()
+        main.LLM_BACKEND = "ollama"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+        assert "think" not in payload
+        assert "think" not in payload["options"]
+
+        # Restore default behavior
+        main.LLM_DISABLE_THINKING = True
+
+    @patch("main.requests.post")
+    def test_call_llm_extra_params_merge(self, mock_post):
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": '{"summary": "x"}'}}]
+        }
+        mock_post.return_value = mock_response
+
+        # Set LLM_EXTRA_PARAMS
+        main.LLM_EXTRA_PARAMS = {
+            "temperature": 0.7,
+            "options": {"num_predict": 512, "top_k": 40},
+            "chat_template_kwargs": {"enable_thinking": True}
+        }
+
+        main.LLM_BACKEND = "ollama"
+        main.call_llm("Tech", "Title", "Feed", "Content")
+        payload = mock_post.call_args[1]["json"]
+
+        assert payload["temperature"] == 0.7
+        assert payload["options"]["num_predict"] == 512
+        assert payload["options"]["top_k"] == 40
+        assert payload["chat_template_kwargs"]["enable_thinking"] is True
+
+        # Clean up
+        main.LLM_EXTRA_PARAMS = {}
+
+    @patch("main.requests.post")
     def test_call_llm_strips_thinking(self, mock_post):
         mock_response = MagicMock()
         valid_json = {"summary": "test", "tags": ["a"], "entities": [], "urgency_score": 1}

@@ -55,6 +55,14 @@ def get_next_llm_url() -> str:
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | litellm | ollama | vllm | generic
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
+LLM_DISABLE_THINKING = os.environ.get("LLM_DISABLE_THINKING", "true").lower() == "true"
+LLM_EXTRA_PARAMS_JSON = os.environ.get("LLM_EXTRA_PARAMS", "")
+LLM_EXTRA_PARAMS = {}
+if LLM_EXTRA_PARAMS_JSON:
+    try:
+        LLM_EXTRA_PARAMS = json.loads(LLM_EXTRA_PARAMS_JSON)
+    except Exception as exc:
+        log.error("Failed to parse LLM_EXTRA_PARAMS JSON: %s", exc)
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
@@ -182,6 +190,16 @@ def mark_entry_read(entry_id: int) -> None:
         log.warning("Failed to mark entry %d as read: %s", entry_id, exc)
 
 
+def deep_merge(dict1: dict, dict2: dict) -> dict:
+    """Recursively merge dict2 into dict1."""
+    for key, value in dict2.items():
+        if key in dict1 and isinstance(dict1[key], dict) and isinstance(value, dict):
+            deep_merge(dict1[key], value)
+        else:
+            dict1[key] = value
+    return dict1
+
+
 # ---------------------------------------------------------------------------
 # LLM client
 # ---------------------------------------------------------------------------
@@ -217,17 +235,33 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         payload["max_tokens"] = 1024
         if supports_response_format:
             payload["response_format"] = {"type": "json_object"}
+        if LLM_DISABLE_THINKING:
+            # Only send thinking parameters if model name suggests it is a thinking/reasoning model
+            # to avoid UnsupportedParamsError on other providers/models.
+            is_thinking_model = any(k in (LLM_MODEL or "").lower() for k in ["r1", "reasoning", "thinking", "deepseek"])
+            if is_thinking_model:
+                payload["thinking"] = {"type": "disabled"}
     elif LLM_BACKEND == "llama.cpp":
-        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        if LLM_DISABLE_THINKING:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         if supports_response_format:
             payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "vllm":
         payload["max_tokens"] = 1024
+        if LLM_DISABLE_THINKING:
+            payload["chat_template_kwargs"] = {"enable_thinking": False}
         if supports_response_format:
             payload["response_format"] = {"type": "json_object"}
     elif LLM_BACKEND == "ollama":
         payload["options"] = {"num_predict": 1024}
         payload["format"] = "json"
+        if LLM_DISABLE_THINKING:
+            payload["think"] = False
+            payload["options"]["think"] = False
+
+    # Merge custom parameters from LLM_EXTRA_PARAMS
+    if LLM_EXTRA_PARAMS:
+        deep_merge(payload, LLM_EXTRA_PARAMS)
 
     headers = {"Content-Type": "application/json"}
     if LLM_API_KEY:
