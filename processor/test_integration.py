@@ -1,7 +1,6 @@
 import sys
 import os
 import json
-import pytest
 from unittest.mock import patch, MagicMock
 import requests
 import time
