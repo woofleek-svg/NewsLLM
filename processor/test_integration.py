@@ -1,4 +1,6 @@
 import sys
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import os
 import json
 import pytest
@@ -189,3 +191,98 @@ class TestHealthServer:
         """Verify that unknown endpoints return 404."""
         resp = requests.get(f"http://localhost:{main.HEALTH_PORT}/other")
         assert resp.status_code == 404
+
+
+class MockServerRequestHandler(BaseHTTPRequestHandler):
+    payloads = []
+
+    def log_message(self, format, *args):
+        pass
+
+    def do_POST(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        MockServerRequestHandler.payloads.append(json.loads(post_data.decode('utf-8')))
+
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+
+        valid_json = {"summary": "test", "tags": ["a"], "entities": [], "urgency_score": 1}
+        self.wfile.write(json.dumps({
+            "choices": [{"message": {"content": json.dumps(valid_json)}}]
+        }).encode('utf-8'))
+
+class TestMockServerIntegration:
+    @classmethod
+    def setup_class(cls):
+        cls.server = HTTPServer(('localhost', 0), MockServerRequestHandler)
+        cls.port = cls.server.server_port
+        cls.thread = threading.Thread(target=cls.server.serve_forever)
+        cls.thread.daemon = True
+        cls.thread.start()
+
+    @classmethod
+    def teardown_class(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+        cls.thread.join()
+
+    def setup_method(self, method):
+        MockServerRequestHandler.payloads.clear()
+
+    def test_mock_server_backends(self):
+        # We will mock the load balancing to always return our mock server
+        with patch("main.get_next_llm_url", return_value=f"http://localhost:{self.port}"):
+            # Save original state
+            orig_backend = main.LLM_BACKEND
+            orig_extra = getattr(main, "LLM_EXTRA_PARAMS", {})
+
+            try:
+                # Test Litellm
+                main.LLM_BACKEND = "litellm"
+                main.LLM_EXTRA_PARAMS = {"temperature": 0.5, "custom_field": "litellm_test"}
+                main.call_llm("Tech", "Title", "Feed", "Content")
+
+                # Test llama.cpp
+                main.LLM_BACKEND = "llama.cpp"
+                main.LLM_EXTRA_PARAMS = {"temperature": 0.2, "custom_field": "llama_test"}
+                main.call_llm("Tech", "Title", "Feed", "Content")
+
+                # Test vllm
+                main.LLM_BACKEND = "vllm"
+                main.LLM_EXTRA_PARAMS = {"temperature": 0.3, "custom_field": "vllm_test"}
+                main.call_llm("Tech", "Title", "Feed", "Content")
+
+                # Test ollama
+                main.LLM_BACKEND = "ollama"
+                main.LLM_EXTRA_PARAMS = {"temperature": 0.4, "custom_field": "ollama_test"}
+                main.call_llm("Tech", "Title", "Feed", "Content")
+            finally:
+                # Restore original state
+                main.LLM_BACKEND = orig_backend
+                main.LLM_EXTRA_PARAMS = orig_extra
+
+        payloads = MockServerRequestHandler.payloads
+
+        assert len(payloads) == 4
+
+        # Verify litellm
+        assert payloads[0]["max_tokens"] == 1024
+        assert payloads[0]["temperature"] == 0.5
+        assert payloads[0]["custom_field"] == "litellm_test"
+
+        # Verify llama.cpp
+        assert payloads[1]["chat_template_kwargs"]["enable_thinking"] is False
+        assert payloads[1]["temperature"] == 0.2
+        assert payloads[1]["custom_field"] == "llama_test"
+
+        # Verify vllm
+        assert payloads[2]["max_tokens"] == 1024
+        assert payloads[2]["temperature"] == 0.3
+        assert payloads[2]["custom_field"] == "vllm_test"
+
+        # Verify ollama
+        assert payloads[3]["options"]["num_predict"] == 1024
+        assert payloads[3]["temperature"] == 0.4
+        assert payloads[3]["custom_field"] == "ollama_test"

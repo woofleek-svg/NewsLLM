@@ -55,6 +55,10 @@ def get_next_llm_url() -> str:
 LLM_MODEL = os.environ.get("LLM_MODEL") or os.environ.get("LLAMA_MODEL", "qwen3.5-35b")
 LLM_BACKEND = os.environ.get("LLM_BACKEND", "llama.cpp")  # llama.cpp | litellm | ollama | vllm | generic
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")  # Required for vLLM with auth, optional otherwise
+try:
+    LLM_EXTRA_PARAMS = json.loads(os.environ.get("LLM_EXTRA_PARAMS", "{}"))
+except json.JSONDecodeError:
+    LLM_EXTRA_PARAMS = {}
 OUTPUT_DB_URL = os.environ["OUTPUT_DB_URL"]
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "300"))
 MAX_CONTENT_LENGTH = int(os.environ.get("MAX_CONTENT_LENGTH", "64000"))
@@ -209,6 +213,10 @@ def call_llm(category: str, title: str, feed_name: str, content: str) -> tuple[d
         ],
         "temperature": 0.1,
     }
+
+    # Merge LLM_EXTRA_PARAMS
+    if LLM_EXTRA_PARAMS:
+        payload.update(LLM_EXTRA_PARAMS)
 
     # Backend-specific options
     supports_response_format = "tencent/hy3-preview" not in (LLM_MODEL or "").lower()
