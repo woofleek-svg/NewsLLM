@@ -12,7 +12,6 @@ os.environ["MINIFLUX_API_KEY"] = "key"
 os.environ["OUTPUT_DB_URL"] = "postgres://db"
 os.environ["LLM_URL"] = "http://llm"
 
-import main
 from main import _optimize_image_url, get_already_processed_ids, extract_image_url
 
 class TestOptimizeImageUrl(unittest.TestCase):
